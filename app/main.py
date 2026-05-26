@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import pytz
+from alembic import command
+from alembic.config import Config
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -15,6 +17,9 @@ BRT = pytz.timezone("America/Sao_Paulo")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    alembic_cfg = Config("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+
     scheduler = AsyncIOScheduler(timezone=BRT)
 
     scheduler.add_job(
