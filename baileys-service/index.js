@@ -16,6 +16,7 @@ app.use(express.json())
 
 const PORT = process.env.PORT || 3000
 const BOT_WEBHOOK_URL = process.env.BOT_WEBHOOK_URL || 'http://localhost:8000/webhook/whatsapp'
+const WHATSAPP_GROUP_ID = process.env.WHATSAPP_GROUP_ID || ''
 
 let currentQR = null
 let sock = null
@@ -25,6 +26,11 @@ let reconnectAttempts = 0
 const MAX_RECONNECT_DELAY = 60000 // 60 segundos
 
 async function forwardToBotWebhook(msg) {
+  // Filtro: só processa mensagens do grupo configurado (economiza bandwidth no free tier)
+  if (WHATSAPP_GROUP_ID && msg.key.remoteJid !== WHATSAPP_GROUP_ID) {
+    return
+  }
+
   const text =
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
