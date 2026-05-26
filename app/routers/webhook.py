@@ -84,6 +84,8 @@ async def receber_mensagem(
     if data is None:
         return {"status": "ignored", "reason": "no_data"}
 
+    logger.info("DEBUG grupo=%s fromMe=%s", data.key.remoteJid, data.key.fromMe)
+
     if data.key.fromMe:
         return {"status": "ignored", "reason": "own_message"}
 
