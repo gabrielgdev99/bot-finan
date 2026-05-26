@@ -199,7 +199,12 @@ DATABASE_URL=postgresql://user:password@localhost:5432/finanpessoal
 BAILEYS_SERVICE_URL=http://localhost:3000
 WHATSAPP_GROUP_ID=120363411203120829@g.us
 BOT_PHONE_NUMBER=5511999999999
+BOT_WEBHOOK_URL=http://localhost:8000/webhook/whatsapp
 ```
+
+**Nota sobre `WHATSAPP_GROUP_ID`:**
+- Se configurada: Baileys só envia webhook para mensagens desse grupo (economiza bandwidth)
+- Se vazia: Baileys envia webhook para todas as mensagens (DMs, todos os grupos)
 
 ### 3. Inicie com Docker Compose
 
@@ -307,6 +312,13 @@ bot-finan/
 | **Banco** | PostgreSQL | ACID, sem cold start no Railway |
 | **Scheduler** | APScheduler | Integra nativamente com FastAPI |
 | **Deploy** | Railway | Free tier inclui PostgreSQL, sem cold start |
+
+### Otimizações para Free Tier
+
+- **Filtro de grupo no Baileys:** Mensagens de outros grupos/DMs são descartadas no serviço Node.js (não geram requisição HTTP desnecessária)
+- **Backoff exponencial:** Reconexões do Baileys com delays progressivos (economiza síncronizações em excesso)
+- **BackgroundTasks:** Jobs assíncronos em background (não bloqueia requisições)
+- **Parser determinístico:** Regex, não LLM (sem custos por token)
 
 ---
 

@@ -1,6 +1,6 @@
 # Architecture — bot-finan
 
-> Atualizado em 25/05/2026
+> Atualizado em 26/05/2026
 > A IA deve registrar aqui cada decisão técnica relevante
 
 ## Stack
@@ -45,3 +45,4 @@
 | 25/05/2026 | Formato posicional: grupo e subgrupo na posição 4 e 5 | Prefixos `grupo:` / `subgrupo:` | Mais limpo para digitar; ambos obrigatórios — bot rejeita se faltar um |
 | 25/05/2026 | Resumo filtra por `data_pagamento` (não por `data_gasto`) | Filtrar por data_gasto | Casal controla por quando o dinheiro sai; cartão de maio com fatura em junho entra no resumo de junho |
 | 25/05/2026 | `data_pagamento` default = `data_gasto` quando não informado | NULL, valor obrigatório | Gastos à vista e PIX têm pagamento imediato; evita NULLs e simplifica queries |
+| 26/05/2026 | Filtro de grupo no Baileys (não só na API) | Filtro só na API | Economiza requisições HTTP no free tier; reduz latência; defesa em profundidade |

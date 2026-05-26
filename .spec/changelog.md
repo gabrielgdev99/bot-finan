@@ -3,6 +3,13 @@
 > Registro de decisões, mudanças e causa raiz de bugs.
 > Formato: data, tipo, descrição.
 
+## 26/05/2026 — Filtro de grupo adicionado no Baileys (otimização free tier)
+- Baileys agora filtra mensagens por `WHATSAPP_GROUP_ID` antes de enviar webhook
+- **Impacto:** Economiza requisições HTTP desnecessárias (DMs, outros grupos não geram POST)
+- **Benefício:** Mais sustentável no Railway free tier; reduz latência
+- **Compatibilidade:** Se `WHATSAPP_GROUP_ID` não estiver configurada, processa todas as mensagens
+- API FastAPI mantém seu filtro (defesa em profundidade)
+
 ## 26/05/2026 — [H] Corrigido loop infinito de sincronização Baileys
 **Problema:** Em produção, após escanear QR code, WhatsApp ficava com "sincronização em andamento" infinita.
 **Causa raiz:** Em `baileys-service/index.js`, o handler `connection.update` chamava `startSocket()` imediatamente a cada evento `close` sem debounce. Em conexões instáveis (Railway free tier), múltiplos eventos `close` em rápida sucessão criavam múltiplas instâncias de socket concorrentes, acionando loops agressivos de reconexão.
