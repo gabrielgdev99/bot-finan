@@ -10,7 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
 
 from app.routers import webhook
-from app.services.jobs import job_resumo_bidiario, job_resumo_diario, job_comparativo_mensal
+from app.services.jobs import job_resumo_bidiario, job_resumo_diario, job_comparativo_mensal, job_processar_lembretes
 
 BRT = pytz.timezone("America/Sao_Paulo")
 
@@ -44,6 +44,13 @@ async def lifespan(app: FastAPI):
         CronTrigger(day=1, hour=8, minute=0, timezone=BRT),
         id="comparativo_mensal",
         name="Comparativo mensal do dia 1",
+    )
+
+    scheduler.add_job(
+        job_processar_lembretes,
+        CronTrigger(hour=8, minute=0, timezone=BRT),
+        id="processar_lembretes",
+        name="Processar lembretes (avisos e lançamentos automáticos)",
     )
 
     scheduler.start()

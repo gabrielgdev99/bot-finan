@@ -10,11 +10,14 @@ from app.services.parser import (
     parse_alias,
     parse_cancela,
     parse_historico,
+    parse_lancar_template,
     parse_lancamento,
     parse_lancamento_multiplo,
+    parse_lembrete,
     parse_orcamento,
     parse_relatorio_cartao,
     parse_remove_alias,
+    parse_remove_lembrete,
     parse_remove_template,
     parse_resumo_comando,
     parse_resumo_periodo,
@@ -71,6 +74,14 @@ def _detectar_tipo(texto: str) -> str:
         return "remove_alias"
     if t.lower() == "aliases":
         return "list_aliases"
+    if parse_lembrete(t) is not None:
+        return "lembrete"
+    if parse_remove_lembrete(t) is not None:
+        return "remove_lembrete"
+    if t.lower() == "lembretes":
+        return "list_lembretes"
+    if parse_lancar_template(t) is not None:
+        return "lancar_template"
     if parse_template(t) is not None:
         return "template"
     if parse_remove_template(t) is not None:

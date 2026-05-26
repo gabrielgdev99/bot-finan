@@ -3,6 +3,28 @@
 > Registro de decisões, mudanças e causa raiz de bugs.
 > Formato: data, tipo, descrição.
 
+## 26/05/2026 — [H] Corrigido loop infinito de sincronização Baileys
+**Problema:** Em produção, após escanear QR code, WhatsApp ficava com "sincronização em andamento" infinita.
+**Causa raiz:** Em `baileys-service/index.js`, o handler `connection.update` chamava `startSocket()` imediatamente a cada evento `close` sem debounce. Em conexões instáveis (Railway free tier), múltiplos eventos `close` em rápida sucessão criavam múltiplas instâncias de socket concorrentes, acionando loops agressivos de reconexão.
+**Solução implementada:**
+- Flag `isReconnecting` previne múltiplos `startSocket()` simultâneos
+- Backoff exponencial: 2s → 4s → 8s → ... → 60s (máximo)
+- Contador `reconnectAttempts` reseta ao reconectar com sucesso
+**Resultado:** Reconexões agora ocorrem com delays progressivos, eliminando loops de sincronização.
+
+## 26/05/2026 — LEMBRETE-T001 implementado
+- Sistema de lembretes para contas fixas mensais (aluguel, condomínio, academia) integrado
+- `Lembrete` model criado: `(id, template_id FK, dia_vencimento INT 1-31, auto BOOL, criado_em)`
+- Service `lembrete.py` com CRUD: `criar_lembrete`, `remover_lembrete`, `listar_lembretes`, `processar_lembretes_do_dia`
+- Parser estendido: `parse_lembrete` detecta `lembrete: template - dia N [- auto]`, `parse_remove_lembrete`, `parse_lancar_template`
+- Job `job_processar_lembretes` roda diário 08h BRT:
+  - Lembretes manuais: aviso enviado 2 dias antes do vencimento
+  - Lembretes automáticos: lançamento criado no próprio dia do vencimento
+  - Deduplicação: delegada a `salvar_lancamento_de_template` (hash com data)
+- Webhook: tipos `lembrete`, `remove_lembrete`, `list_lembretes`, `lancar_template` adicionados
+- Mensagem: handlers para CRUD e lançamento manual integrados
+- Ajuda atualizada com nova seção de lembretes e exemplos
+
 ## 26/05/2026 — MULTI-T001 implementado
 - Novo formato de lançamento múltiplo: primeira linha = data, resto = lançamentos
 - Parser: `parse_lancamento_multiplo()` detecta e extrai formato automicamente

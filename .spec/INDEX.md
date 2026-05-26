@@ -84,7 +84,7 @@
 | PROJ-T001 | Projeção de gasto e saldo no resumo mensal | [x] Concluída |
 | COMPARE-T001 | Comparativo mensal automático no dia 1 | [x] Concluída |
 | HISTORICO-T001 | Histórico mensal de grupo ou subgrupo | [x] Concluída |
-| LEMBRETE-T001 | Lembretes de contas vinculados a templates | [ ] Não iniciada |
+| LEMBRETE-T001 | Lembretes de contas vinculados a templates | [x] Concluída |
 | PERIODO-T001 | Resumo por período customizado | [x] Concluída |
 
 ## Arquivos de contexto disponíveis

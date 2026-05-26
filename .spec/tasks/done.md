@@ -2,6 +2,63 @@
 
 > Tasks concluídas. Arquivo de referência — raramente entra no contexto ativo.
 
+## 26/05/2026 — LEMBRETE-T001 implementado
+
+**Concluído em:** 26/05/2026
+**Épico:** Inteligência Analítica
+
+### Implementação:
+- Migration `0007_add_lembretes.py`: tabela `lembretes (id, template_id FK, dia_vencimento INT 1-31, auto BOOL, criado_em TIMESTAMP)`
+- Model `Lembrete` em `app/models/lembrete.py` com relationship lazy-loaded para `Template`
+- Service `lembrete.py` com 4 funções:
+  - `criar_lembrete(template_nome, dia_vencimento, auto, db)` — valida template e dia, cria lembrete
+  - `remover_lembrete(template_nome, db)` — remove por template, retorna o removido ou None
+  - `listar_lembretes(db)` — retorna lista com template eager-loaded
+  - `processar_lembretes_do_dia(db)` — detecta lembretes que vencem hoje ou em 2 dias, retorna tupla (aviso_list, auto_list)
+- Parser estendido em `app/services/parser.py`:
+  - `parse_lembrete()` — detecta `lembrete: <template> - dia <N> [- auto]` e retorna `LembreteDTO`
+  - `parse_remove_lembrete()` — detecta `remove lembrete: <template>` e retorna `RemoveLembreteDTO`
+  - `parse_lancar_template()` — detecta `lançar <template>` e retorna `LancarTemplateDTO`
+  - 3 novos regex adicionados
+- Schemas estendidos em `app/schemas.py`:
+  - `LembreteDTO`, `RemoveLembreteDTO`, `LancarTemplateDTO`
+- Webhook estendido em `app/routers/webhook.py`:
+  - `_detectar_tipo()` detecta 4 novos tipos: `lembrete`, `remove_lembrete`, `list_lembretes`, `lancar_template`
+  - Ordem: detectados ANTES de `lancamento_multiplo` para evitar conflitos
+- Service `mensagem.py` estendido:
+  - Handler `lembrete`: cria lembrete, responde erro se template não encontrado ou dia inválido
+  - Handler `remove_lembrete`: remove lembrete, responde erro se não encontrado
+  - Handler `list_lembretes`: lista todos cadastrados via `_formatar_listar_lembretes`
+  - Handler `lancar_template`: lança manualmente usando `salvar_lancamento_de_template`, retorna resumo normal
+  - Função `_formatar_listar_lembretes(lembretes)` — formata resposta com modo (manual/auto), dia, descrição, valor, grupo>subgrupo
+- Service `jobs.py` estendido:
+  - `job_processar_lembretes()` — roda diário 08h BRT
+  - Avisos: para lembretes manuais que vencem em 2 dias, envia mensagem com formato de confirmação
+  - Auto: para lembretes automáticos que vencem hoje, lança via `salvar_lancamento_de_template` + envia confirmação
+  - Deduplicação: delegada à função `salvar_lancamento_de_template` (por hash com data)
+- Main.py estendido:
+  - Importa `job_processar_lembretes`
+  - Agendamento: `CronTrigger(hour=8, minute=0, timezone=BRT)` — diário 08h BRT
+- Ajuda atualizada em `app/services/resumo.py`:
+  - Adicionada seção "Lembretes" com formatos, exemplos, modo de uso (criar, confirmar, listar, remover)
+- Models/__init__.py atualizado: exporta `Lembrete`
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ Tabela `lembretes (id, template_id FK, dia_vencimento INT 1-31, auto BOOL)` criada via migration
+- ✅ `lembrete: aluguel - dia 5` cria lembrete manual vinculado ao template "aluguel"
+- ✅ `lembrete: aluguel - dia 5 - auto` cria lembrete em modo automático
+- ✅ `lembrete:` com template inexistente responde com erro
+- ✅ Job diário envia aviso 2 dias antes do vencimento no modo manual
+- ✅ `lançar aluguel` após o aviso cria o lançamento a partir do template com data de hoje
+- ✅ Job diário lança automaticamente no dia do vencimento no modo auto e envia confirmação
+- ✅ Deduplicação: lembrete auto não lança duas vezes no mesmo mês (mesmo dia) — garantida por hash em `salvar_lancamento_de_template`
+- ✅ `lembretes` lista todos com modo (manual/auto), dia e dados do template
+- ✅ `remove lembrete: aluguel` remove e confirma; inexistente responde com erro
+- ✅ Comando `ajuda` inclui seção de lembretes com formato e exemplos
+
+**Arquivos criados:** `alembic/versions/0007_add_lembretes.py`, `app/models/lembrete.py`, `app/services/lembrete.py`
+**Arquivos modificados:** `app/models/__init__.py`, `app/schemas.py`, `app/services/parser.py`, `app/routers/webhook.py`, `app/services/mensagem.py`, `app/services/jobs.py`, `app/main.py`, `app/services/resumo.py`
+
 ## 26/05/2026 — MULTI-T001 implementado
 
 **Concluído em:** 26/05/2026

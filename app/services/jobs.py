@@ -147,3 +147,40 @@ async def job_comparativo_mensal() -> None:
 
     except Exception:
         logger.exception("job_comparativo_mensal falhou")
+
+
+async def job_processar_lembretes() -> None:
+    """Processa lembretes: avisa 2 dias antes (manual) ou lança no próprio dia (auto)."""
+    try:
+        from app.services.lancamento import salvar_lancamento_de_template
+        from app.services.lembrete import processar_lembretes_do_dia
+
+        async with AsyncSessionLocal() as session:
+            lembretes_aviso, lembretes_auto = await processar_lembretes_do_dia(session)
+
+        # Envia avisos para lembretes manuais (2 dias antes)
+        for lembrete in lembretes_aviso:
+            template = lembrete.template
+            valor_fmt = _fmt(template.valor)
+            categoria = f"{template.subgrupo.grupo.nome} > {template.subgrupo.nome}"
+            texto = f"⏰ {template.nome} vence em 2 dias (dia {lembrete.dia_vencimento})!\n{template.descricao} — R$ {valor_fmt} → {categoria}\n\nResponda *lançar {template.nome}* para registrar automaticamente."
+            await enviar_mensagem(settings.WHATSAPP_GROUP_ID, texto)
+            logger.info("job_processar_lembretes | aviso enviado | template=%s", template.nome)
+
+        # Lança automaticamente para lembretes auto (no próprio dia)
+        async with AsyncSessionLocal() as session:
+            for lembrete in lembretes_auto:
+                template = lembrete.template
+                lancamento = await salvar_lancamento_de_template(template.nome, session)
+                if lancamento:
+                    valor_fmt = _fmt(template.valor)
+                    categoria = f"{template.subgrupo.grupo.nome} > {template.subgrupo.nome}"
+                    texto = f"✅ Lançamento automático: {template.nome}\n{template.descricao} — R$ {valor_fmt} → {categoria}"
+                    await enviar_mensagem(settings.WHATSAPP_GROUP_ID, texto)
+                    logger.info("job_processar_lembretes | lançamento automático | template=%s", template.nome)
+
+        if lembretes_aviso or lembretes_auto:
+            logger.info("job_processar_lembretes concluido | avisos=%d | auto=%d", len(lembretes_aviso), len(lembretes_auto))
+
+    except Exception:
+        logger.exception("job_processar_lembretes falhou")

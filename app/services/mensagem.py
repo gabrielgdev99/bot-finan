@@ -6,11 +6,14 @@ from app.services.parser import (
     parse_alias,
     parse_cancela,
     parse_historico,
+    parse_lancar_template,
     parse_lancamento,
     parse_lancamento_multiplo,
+    parse_lembrete,
     parse_orcamento,
     parse_relatorio_cartao,
     parse_remove_alias,
+    parse_remove_lembrete,
     parse_remove_template,
     parse_resumo_comando,
     parse_resumo_periodo,
@@ -88,6 +91,67 @@ async def processar_mensagem(texto: str, tipo: str, grupo_id: str) -> None:
 
             aliases = await listar_aliases(db)
             resposta = _formatar_listar_aliases(aliases)
+            await enviar_mensagem(grupo_id, resposta)
+
+        elif tipo == "lembrete":
+            from app.services.lembrete import criar_lembrete
+
+            dto = parse_lembrete(texto)
+            if dto is None:
+                return
+
+            lembrete = await criar_lembrete(
+                template_nome=dto.template_nome,
+                dia_vencimento=dto.dia_vencimento,
+                auto=dto.auto,
+                db=db,
+            )
+            if lembrete is None:
+                resposta = f"❌ Template '{dto.template_nome}' não encontrado ou dia inválido (deve ser 1-31)."
+            else:
+                modo = "automático" if dto.auto else "manual"
+                resposta = f'✅ Lembrete criado: "{dto.template_nome}" vence todo dia {dto.dia_vencimento} ({modo}).\nVocê será avisado 2 dias antes.' if not dto.auto else f'✅ Lembrete criado: "{dto.template_nome}" será lançado automaticamente todo dia {dto.dia_vencimento}.'
+            await enviar_mensagem(grupo_id, resposta)
+
+        elif tipo == "remove_lembrete":
+            from app.services.lembrete import remover_lembrete
+
+            dto = parse_remove_lembrete(texto)
+            if dto is None:
+                return
+
+            removido = await remover_lembrete(dto.template_nome, db)
+            if removido is None:
+                resposta = f"❌ Lembrete para '{dto.template_nome}' não encontrado."
+            else:
+                resposta = f'✅ Lembrete "{dto.template_nome}" removido.'
+            await enviar_mensagem(grupo_id, resposta)
+
+        elif tipo == "list_lembretes":
+            from app.services.lembrete import listar_lembretes
+
+            lembretes = await listar_lembretes(db)
+            resposta = _formatar_listar_lembretes(lembretes)
+            await enviar_mensagem(grupo_id, resposta)
+
+        elif tipo == "lancar_template":
+            dto = parse_lancar_template(texto)
+            if dto is None:
+                return
+
+            template = await resolver_template(dto.template_nome, db)
+            if template is None:
+                resposta = f"❌ Template '{dto.template_nome}' não encontrado."
+                await enviar_mensagem(grupo_id, resposta)
+                return
+
+            lancamento = await salvar_lancamento_de_template(template.nome, db)
+            if lancamento is None:
+                return
+
+            hoje = date.today()
+            resumo = await calcular_resumo(template.subgrupo.grupo.nome, hoje.month, hoje.year, db)
+            resposta = formatar_resumo_lancamento(resumo, lancamento.id)
             await enviar_mensagem(grupo_id, resposta)
 
         elif tipo == "erro_parcelas":
@@ -460,5 +524,21 @@ async def _formatar_resposta_multiplo(lancamentos_salvos, erros, mes, ano, db) -
             linhas.append(f"📊 {grupo_nome}: R$ {total_fmt} | Orçamento: R$ {orcamento_fmt} | Restante: R$ {restante_fmt} ({pct}%)")
         else:
             linhas.append(f"📊 {grupo_nome}: R$ {total_fmt} gastos")
+
+    return "\n".join(linhas)
+
+
+def _formatar_listar_lembretes(lembretes: list) -> str:
+    """Formata lista de lembretes cadastrados."""
+    if not lembretes:
+        return "📋 Nenhum lembrete cadastrado."
+
+    linhas = ["📋 Lembretes cadastrados:"]
+    for l in lembretes:
+        template = l.template
+        valor_fmt = _fmt(template.valor)
+        modo = "auto" if l.auto else "manual"
+        grupo_nome = template.subgrupo.grupo.nome
+        linhas.append(f"• {template.nome} → dia {l.dia_vencimento} | {template.descricao} | R$ {valor_fmt} | {grupo_nome} > {template.subgrupo.nome} ({modo})")
 
     return "\n".join(linhas)

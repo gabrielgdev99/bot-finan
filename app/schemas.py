@@ -153,3 +153,20 @@ class AliasInfoDTO:
     palavra_chave: str
     grupo_nome: str
     subgrupo_nome: str
+
+
+@dataclass
+class LembreteDTO:
+    template_nome: str
+    dia_vencimento: int
+    auto: bool = False
+
+
+@dataclass
+class RemoveLembreteDTO:
+    template_nome: str
+
+
+@dataclass
+class LancarTemplateDTO:
+    template_nome: str

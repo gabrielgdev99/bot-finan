@@ -20,6 +20,9 @@ const BOT_WEBHOOK_URL = process.env.BOT_WEBHOOK_URL || 'http://localhost:8000/we
 let currentQR = null
 let sock = null
 let isConnected = false
+let isReconnecting = false
+let reconnectAttempts = 0
+const MAX_RECONNECT_DELAY = 60000 // 60 segundos
 
 async function forwardToBotWebhook(msg) {
   const text =
@@ -97,11 +100,21 @@ async function startSocket() {
       const code = (lastDisconnect?.error)?.output?.statusCode
       const shouldReconnect = code !== DisconnectReason.loggedOut
       console.log(`[baileys] conexão fechada (código ${code}), reconectando: ${shouldReconnect}`)
-      if (shouldReconnect) startSocket()
+      if (shouldReconnect && !isReconnecting) {
+        isReconnecting = true
+        reconnectAttempts++
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY)
+        console.log(`[baileys] tentativa ${reconnectAttempts} de reconexão em ${delay}ms`)
+        setTimeout(() => {
+          startSocket()
+        }, delay)
+      }
     }
 
     if (connection === 'open') {
       isConnected = true
+      isReconnecting = false
+      reconnectAttempts = 0
       currentQR = null
       console.log('[baileys] conectado ao WhatsApp!')
     }

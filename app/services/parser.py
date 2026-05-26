@@ -2,7 +2,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from app.schemas import AliasDTO, CancelaDTO, HistoricoComandoDTO, LancamentoDTO, OrcamentoDTO, RelatorioCartaoDTO, ResumoComandoDTO, ResumoPeriodoDTO, TemplateDTO, RemoveTemplateDTO, RemoveAliasDTO, UltimosDTO
+from app.schemas import AliasDTO, CancelaDTO, HistoricoComandoDTO, LancamentoDTO, LancarTemplateDTO, LembreteDTO, OrcamentoDTO, RelatorioCartaoDTO, RemoveAliasDTO, RemoveLembreteDTO, ResumoComandoDTO, ResumoPeriodoDTO, RemoveTemplateDTO, TemplateDTO, UltimosDTO
 
 _ORCAMENTO_RE = re.compile(
     r"^or[cç]amento:\s*(.+?)\s*-\s*(.+?)\s*-\s*([\d]+(?:[.,]\d+)?)(?:\s*-\s*mes:\s*(\d{2}/\d{2}))?\s*$",
@@ -28,6 +28,12 @@ _ALIAS_RE = re.compile(
     re.IGNORECASE,
 )
 _REMOVE_ALIAS_RE = re.compile(r"^remove\s+alias:\s*(.+?)\s*$", re.IGNORECASE)
+_LEMBRETE_RE = re.compile(
+    r"^lembrete:\s*(.+?)\s*-\s*dia\s*(\d+)(?:\s*-\s*(auto))?\s*$",
+    re.IGNORECASE,
+)
+_REMOVE_LEMBRETE_RE = re.compile(r"^remove\s+lembrete:\s*(.+?)\s*$", re.IGNORECASE)
+_LANCAR_TEMPLATE_RE = re.compile(r"^lan[çc]ar\s+(.+?)\s*$", re.IGNORECASE)
 
 _CAMPO_RE = re.compile(r"^([\w\s]+):\s*(.+)$")
 
@@ -431,3 +437,46 @@ def _parse_mes_ano(texto: str) -> date | None:
         return date(ano, mes, 1)
     except ValueError:
         return None
+
+
+def parse_lembrete(texto: str) -> LembreteDTO | None:
+    """
+    Parseia comando de criação de lembrete.
+    Formatos aceitos:
+    - lembrete: aluguel - dia 5
+    - lembrete: aluguel - dia 5 - auto
+    """
+    match = _LEMBRETE_RE.match(texto.strip())
+    if not match:
+        return None
+
+    template_nome = match.group(1).strip()
+    dia_vencimento = int(match.group(2))
+    auto = match.group(3) is not None and match.group(3).lower() == "auto"
+
+    if not template_nome or not (1 <= dia_vencimento <= 31):
+        return None
+
+    return LembreteDTO(template_nome=template_nome, dia_vencimento=dia_vencimento, auto=auto)
+
+
+def parse_remove_lembrete(texto: str) -> RemoveLembreteDTO | None:
+    """Parseia comando de remoção de lembrete."""
+    match = _REMOVE_LEMBRETE_RE.match(texto.strip())
+    if not match:
+        return None
+    template_nome = match.group(1).strip()
+    if not template_nome:
+        return None
+    return RemoveLembreteDTO(template_nome=template_nome)
+
+
+def parse_lancar_template(texto: str) -> LancarTemplateDTO | None:
+    """Parseia comando de lançamento manual de template."""
+    match = _LANCAR_TEMPLATE_RE.match(texto.strip())
+    if not match:
+        return None
+    template_nome = match.group(1).strip()
+    if not template_nome:
+        return None
+    return LancarTemplateDTO(template_nome=template_nome)
