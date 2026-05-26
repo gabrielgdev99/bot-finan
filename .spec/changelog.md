@@ -3,6 +3,16 @@
 > Registro de decisões, mudanças e causa raiz de bugs.
 > Formato: data, tipo, descrição.
 
+## 26/05/2026 — MULTI-T001 implementado
+- Novo formato de lançamento múltiplo: primeira linha = data, resto = lançamentos
+- Parser: `parse_lancamento_multiplo()` detecta e extrai formato automicamente
+- Webhook: `_detectar_tipo()` agora diferencia `lancamento_multiplo` de `lancamento` simples
+- Mensagem: handler dedicado processa cada linha, coleta sucessos/erros, formata resposta consolidada
+- Resposta consolida lançamentos + resumo por grupo com orçamento e alertas
+- Suporta todos os campos opcionais: cartão, parcelas, alias, grupo/subgrupo explícito
+- Deduplicação funciona por linha (hash no `texto_original` preservado)
+- Compatibilidade total com formato simples mantida (sem regressão)
+
 ## 25/05/2026 — Projeto iniciado
 - Briefing realizado com Gabriel
 - Spec gerado via vireum-spec distill
