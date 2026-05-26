@@ -64,6 +64,8 @@ async def job_resumo_diario() -> None:
 async def job_resumo_bidiario() -> None:
     """Envia resumo mensal agrupado por grupo e subgrupo. Roda a cada 2 dias às 08h00 BRT."""
     try:
+        from app.services.resumo import calcular_projecao, formatar_projecao
+
         agora = datetime.now(BRT)
         mes_atual = agora.month
         ano_atual = agora.year
@@ -79,6 +81,9 @@ async def job_resumo_bidiario() -> None:
                 .order_by(Lancamento.grupo_id, Lancamento.subgrupo_id)
             )
             lancamentos = resultado.scalars().all()
+
+            # Calcula projeção
+            projecao = await calcular_projecao(mes_atual, ano_atual, session)
 
         # Agrupa: grupo_nome -> subgrupo -> total
         grupos: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -102,6 +107,12 @@ async def job_resumo_bidiario() -> None:
             linhas.append("")
 
         linhas.append(f"*Total geral: R$ {_fmt(total_geral)}*")
+
+        # Anexa projeção se disponível
+        if projecao is not None:
+            linhas.append("")
+            linhas.append(formatar_projecao(projecao, mes_atual, ano_atual))
+
         texto = "\n".join(linhas)
 
         await enviar_mensagem(settings.WHATSAPP_GROUP_ID, texto)
@@ -109,3 +120,30 @@ async def job_resumo_bidiario() -> None:
 
     except Exception:
         logger.exception("job_resumo_bidiario falhou")
+
+
+async def job_comparativo_mensal() -> None:
+    """Envia comparativo do mês que fechou vs mês anterior. Roda todo dia 1 às 08h00 BRT."""
+    try:
+        from app.services.resumo import calcular_comparativo, formatar_comparativo
+
+        agora = datetime.now(BRT)
+        # No dia 1, comparamos o mês anterior (M-1) vs o mês anterior ao anterior (M-2)
+        # Exemplo: 1º de junho, compara maio vs abril
+        mes_a_comparar = agora.month - 1 if agora.month > 1 else 12
+        ano_a_comparar = agora.year if agora.month > 1 else agora.year - 1
+
+        async with AsyncSessionLocal() as session:
+            comparativo = await calcular_comparativo(mes_a_comparar, ano_a_comparar, session)
+
+        # Se não há grupos para comparar, não envia nada
+        if not comparativo.grupos:
+            logger.info("job_comparativo_mensal | nenhum gasto registrado em nenhum dos meses")
+            return
+
+        texto = formatar_comparativo(comparativo)
+        await enviar_mensagem(settings.WHATSAPP_GROUP_ID, texto)
+        logger.info("job_comparativo_mensal concluido | mes=%d/%d | grupos=%d", mes_a_comparar, ano_a_comparar, len(comparativo.grupos))
+
+    except Exception:
+        logger.exception("job_comparativo_mensal falhou")

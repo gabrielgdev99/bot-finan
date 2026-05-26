@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
+from calendar import monthrange
 
 from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.grupo import Grupo
 from app.models.lancamento import Lancamento
 from app.models.subgrupo import Subgrupo
-from app.schemas import LancamentoInfo
+from app.schemas import HistoricoMesDTO, LancamentoInfo, ProjecaoDTO
 
 _MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -225,6 +227,12 @@ def formatar_ajuda() -> str:
         "📋 *Orçamento:*\n"
         "`orçamento: grupo - subgrupo - valor`\n"
         "Ex: `orçamento: Alimentação - Mercado - 800`\n\n"
+        "📌 *Templates (lançamentos recorrentes):*\n"
+        "`template: nome - descrição - valor - Grupo - Subgrupo`\n"
+        "_(opcional: `- cartao: nome`)_\n"
+        "Ex: `template: aluguel - aluguel ap - 1500 - Moradia - Aluguel`\n"
+        "Usar: `aluguel` (cria lançamento com data de hoje)\n"
+        "Listar: `templates` | Remover: `remove template: aluguel`\n\n"
         "💳 *Relatório por cartão:*\n"
         "`cartao: nome` ou `cartao: nome - mes: MM/AA`\n\n"
         "📊 *Resumo:*\n"
@@ -233,6 +241,193 @@ def formatar_ajuda() -> str:
         "`ultimos: N` _(máx. 20)_\n\n"
         "🗑️ *Cancelar lançamento:*\n"
         "`cancela: ID`"
+    )
+
+
+async def calcular_historico(
+    grupo_id: int,
+    subgrupo_id: int | None,
+    db: AsyncSession,
+    n_meses: int = 3,
+) -> list[HistoricoMesDTO]:
+    """
+    Calcula histórico de gasto dos últimos N meses para um grupo ou subgrupo.
+
+    Retorna lista de HistoricoMesDTO em ordem cronológica (mês mais antigo primeiro).
+    Marca o mês atual com em_andamento=True.
+    Inclui meses sem lançamento como gasto=0.
+    """
+
+    # Calcula data inicial (N meses atrás)
+    hoje = date.today()
+    mes_inicio = hoje.month - n_meses + 1
+    ano_inicio = hoje.year
+    if mes_inicio <= 0:
+        ano_inicio -= 1
+        mes_inicio += 12
+
+    # Monta lista de meses a consultar
+    historico_dict: dict[tuple[int, int], HistoricoMesDTO] = {}
+    mes_atual = (hoje.month, hoje.year)
+    current_mes = mes_inicio
+    current_ano = ano_inicio
+    for _ in range(n_meses):
+        em_andamento = (current_mes == hoje.month and current_ano == hoje.year)
+        historico_dict[(current_mes, current_ano)] = HistoricoMesDTO(
+            mes=current_mes,
+            ano=current_ano,
+            gasto=Decimal("0"),
+            orcamento=Decimal("0"),
+            percentual=None,
+            em_andamento=em_andamento,
+        )
+        # Próximo mês
+        current_mes += 1
+        if current_mes > 12:
+            current_mes = 1
+            current_ano += 1
+
+    # Consulta gastos por mês
+    if subgrupo_id is not None:
+        # Por subgrupo específico
+        resultado = await db.execute(
+            select(
+                extract("month", Lancamento.data_pagamento),
+                extract("year", Lancamento.data_pagamento),
+                func.coalesce(func.sum(Lancamento.valor), Decimal("0")),
+            )
+            .where(
+                Lancamento.subgrupo_id == subgrupo_id,
+            )
+            .group_by(
+                extract("month", Lancamento.data_pagamento),
+                extract("year", Lancamento.data_pagamento),
+            )
+        )
+    else:
+        # Por grupo inteiro (soma todos os subgrupos)
+        resultado = await db.execute(
+            select(
+                extract("month", Lancamento.data_pagamento),
+                extract("year", Lancamento.data_pagamento),
+                func.coalesce(func.sum(Lancamento.valor), Decimal("0")),
+            )
+            .join(Subgrupo, Lancamento.subgrupo_id == Subgrupo.id)
+            .where(
+                Subgrupo.grupo_id == grupo_id,
+            )
+            .group_by(
+                extract("month", Lancamento.data_pagamento),
+                extract("year", Lancamento.data_pagamento),
+            )
+        )
+
+    gastos_por_mes: dict[tuple[int, int], Decimal] = {}
+    for row in resultado:
+        mes, ano, gasto = row
+        gastos_por_mes[(int(mes), int(ano))] = Decimal(str(gasto))
+
+    # Atualiza histórico com gastos reais
+    for (mes, ano), historico_mes in historico_dict.items():
+        gasto = gastos_por_mes.get((mes, ano), Decimal("0"))
+        historico_mes.gasto = gasto
+
+    # Calcula orçamento vigente (não histórico, mas vigente)
+    if subgrupo_id is not None:
+        subgrupo = await db.scalar(select(Subgrupo).where(Subgrupo.id == subgrupo_id))
+        orcamento_vigente = subgrupo.orcamento_mensal if subgrupo else Decimal("0")
+    else:
+        resultado_orcamento = await db.execute(
+            select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
+            .where(Subgrupo.grupo_id == grupo_id)
+        )
+        orcamento_vigente = resultado_orcamento.scalar() or Decimal("0")
+
+    # Atualiza orçamento e percentual em todos os meses
+    for historico_mes in historico_dict.values():
+        historico_mes.orcamento = orcamento_vigente
+        if orcamento_vigente > 0:
+            historico_mes.percentual = (
+                historico_mes.gasto / orcamento_vigente * 100
+            ).quantize(Decimal("1"))
+
+    # Retorna em ordem cronológica
+    return sorted(historico_dict.values(), key=lambda x: (x.ano, x.mes))
+
+
+async def calcular_projecao(mes: int, ano: int, db: AsyncSession) -> ProjecaoDTO | None:
+    """
+    Calcula projeção de gasto até o fim do mês.
+
+    Cálculo:
+    - dias_passados = COUNT(DISTINCT data_pagamento) no mês com lançamentos
+    - Se dias_passados = 0 → retorna None (bloco omitido)
+    - total_gasto = SUM(valor) de todos os lançamentos do mês
+    - ritmo = total_gasto / dias_passados
+    - dias_no_mes = quantidade de dias do mês (28/29/30/31)
+    - projecao = ritmo * dias_no_mes
+    - orcamento_total = SUM(subgrupos.orcamento_mensal)
+    - margem = orcamento_total - projecao
+
+    Alertas:
+    - projecao > 90% orcamento → "⚠️"
+    - projecao > 100% orcamento → "🚨"
+    """
+    # Total de dias no mês
+    _, dias_no_mes = monthrange(ano, mes)
+
+    # Calcula total gasto e dias com lançamentos
+    resultado = await db.execute(
+        select(
+            func.coalesce(func.sum(Lancamento.valor), Decimal("0")),
+            func.count(func.distinct(Lancamento.data_pagamento))
+        )
+        .where(
+            extract("month", Lancamento.data_pagamento) == mes,
+            extract("year", Lancamento.data_pagamento) == ano,
+        )
+    )
+    row = resultado.first()
+
+    if not row:
+        total_gasto = Decimal("0")
+        dias_passados = 0
+    else:
+        total_gasto, dias_passados = row
+        dias_passados = int(dias_passados) if dias_passados else 0
+
+    # Se não há lançamentos, omite bloco
+    if dias_passados == 0:
+        return None
+
+    # Calcula ritmo e projeção
+    ritmo_diario = Decimal(str(total_gasto)) / Decimal(dias_passados)
+    projecao_fim_mes = ritmo_diario * Decimal(dias_no_mes)
+
+    # Calcula orçamento total (soma de todos os subgrupos)
+    resultado_orcamento = await db.execute(
+        select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
+    )
+    orcamento_total = Decimal(str(resultado_orcamento.scalar()))
+
+    # Calcula margem
+    margem = orcamento_total - projecao_fim_mes
+
+    # Define alerta
+    alerta = None
+    if orcamento_total > 0:
+        percentual_projecao = (projecao_fim_mes / orcamento_total * 100).quantize(Decimal("1"))
+        if percentual_projecao >= 100:
+            alerta = "🚨"
+        elif percentual_projecao >= 90:
+            alerta = "⚠️"
+
+    return ProjecaoDTO(
+        ritmo_diario=ritmo_diario.quantize(Decimal("0.01")),
+        projecao_fim_mes=projecao_fim_mes.quantize(Decimal("0.01")),
+        orcamento_total=orcamento_total.quantize(Decimal("0.01")),
+        margem=margem.quantize(Decimal("0.01")),
+        alerta=alerta,
     )
 
 
@@ -315,5 +510,287 @@ def formatar_cancela_nao_encontrado(lancamento_id: int) -> str:
     return f"❌ Lançamento #{lancamento_id} não encontrado."
 
 
+def formatar_projecao(projecao: ProjecaoDTO, mes: int, ano: int) -> str:
+    """Formata bloco de projeção para anexar ao resumo."""
+    linhas = [
+        f"📈 *Projeção para {_MESES[mes - 1]}/{str(ano)[2:]}:*",
+        f"• Ritmo atual: R$ {_fmt(projecao.ritmo_diario)}/dia",
+        f"• Estimativa fim do mês: R$ {_fmt(projecao.projecao_fim_mes)}",
+    ]
+
+    # Só exibe margem se há orçamento total
+    if projecao.orcamento_total > 0:
+        linhas.append(f"• Orçamento total: R$ {_fmt(projecao.orcamento_total)} | Margem restante: R$ {_fmt(projecao.margem)}")
+
+    # Adiciona alerta se houver
+    if projecao.alerta:
+        if projecao.alerta == "🚨":
+            linhas.append(f"🚨 *Projeção indica estouro do orçamento*")
+        elif projecao.alerta == "⚠️":
+            linhas.append(f"⚠️ *Projeção indica orçamento apertado*")
+
+    return "\n".join(linhas)
+
+
+def formatar_historico(
+    historico: list[HistoricoMesDTO],
+    grupo_nome: str,
+    subgrupo_nome: str | None = None,
+) -> str:
+    """
+    Formata lista de HistoricoMesDTO em mensagem legível.
+
+    Exemplo (por subgrupo):
+    📈 Histórico — Alimentação > Mercado
+    • mar/26: R$ 380,00 / R$ 400,00 (95%) ⚠️
+    • abr/26: R$ 290,00 / R$ 400,00 (72%) ✅
+    • mai/26: R$ 210,00 / R$ 400,00 (52%) ✅ ← em andamento
+    """
+    titulo = f"📈 Histórico — {grupo_nome}"
+    if subgrupo_nome:
+        titulo += f" > {subgrupo_nome}"
+
+    linhas = [f"{titulo}\n"]
+
+    for mes_dto in historico:
+        mes_nome = _MESES[mes_dto.mes - 1]
+        ano_fmt = str(mes_dto.ano)[2:]  # Ex: 26
+        gasto_fmt = _fmt(mes_dto.gasto)
+
+        # Linha base: mês + gasto
+        linha = f"• {mes_nome.lower()}/{ano_fmt}: R$ {gasto_fmt}"
+
+        # Adiciona orçamento e percentual se houver
+        if mes_dto.orcamento > 0:
+            orcamento_fmt = _fmt(mes_dto.orcamento)
+            pct = mes_dto.percentual
+            alerta = ""
+            if pct is not None:
+                if pct >= 100:
+                    alerta = " 🚨"
+                elif pct >= 80:
+                    alerta = " ⚠️"
+                else:
+                    alerta = " ✅"
+            linha += f" / R$ {orcamento_fmt} ({pct}%){alerta}"
+        else:
+            linha += " ✅"
+
+        # Marca mês em andamento
+        if mes_dto.em_andamento:
+            linha += " ← em andamento"
+
+        linhas.append(linha)
+
+    return "\n".join(linhas)
+
+
 def _fmt(valor: Decimal) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+async def calcular_comparativo(mes_atual: int, ano_atual: int, db: AsyncSession) -> "ComparativoDTO":
+    """
+    Calcula comparativo entre mês atual (M-1) vs mês anterior (M-2).
+    Por exemplo, no dia 1/06, compara mai (05) vs abr (04).
+    """
+    from app.schemas import ComparativoDTO, ComparativoGrupoDTO
+
+    # Calcula mês e ano anterior
+    if mes_atual == 1:
+        mes_anterior = 12
+        ano_anterior = ano_atual - 1
+    else:
+        mes_anterior = mes_atual - 1
+        ano_anterior = ano_atual
+
+    # Busca todos os grupos com lançamentos no mês atual
+    resultado_atual = await db.execute(
+        select(
+            Grupo.id,
+            Grupo.nome,
+            func.coalesce(func.sum(Lancamento.valor), Decimal("0"))
+        )
+        .join(Lancamento, Grupo.id == Lancamento.grupo_id, isouter=True)
+        .where(
+            extract("month", Lancamento.data_pagamento) == mes_atual,
+            extract("year", Lancamento.data_pagamento) == ano_atual,
+        )
+        .group_by(Grupo.id, Grupo.nome)
+    )
+    grupos_atuais = resultado_atual.all()
+
+    # Dicionário com gastos do mês anterior para todos os grupos
+    resultado_anterior = await db.execute(
+        select(
+            Grupo.id,
+            func.coalesce(func.sum(Lancamento.valor), Decimal("0"))
+        )
+        .join(Lancamento, Grupo.id == Lancamento.grupo_id, isouter=True)
+        .where(
+            extract("month", Lancamento.data_pagamento) == mes_anterior,
+            extract("year", Lancamento.data_pagamento) == ano_anterior,
+        )
+        .group_by(Grupo.id)
+    )
+    gastos_anteriores = {grupo_id: Decimal(str(valor)) for grupo_id, valor in resultado_anterior.all()}
+
+    # Monta lista de grupos a comparar
+    # Critério: inclui grupos que têm gasto em pelo menos um dos dois meses
+    grupos_ids = set(g[0] for g in grupos_atuais) | set(gastos_anteriores.keys())
+
+    grupos_comparativo = []
+    total_gasto_atual = Decimal("0")
+    total_orcamento_atual = Decimal("0")
+    total_gasto_anterior = Decimal("0")
+
+    for grupo_id in sorted(grupos_ids):
+        # Busca dados do grupo
+        grupo = await db.scalar(select(Grupo).where(Grupo.id == grupo_id))
+        if not grupo:
+            continue
+
+        # Gasto no mês atual
+        gasto_atual_row = next((g for g in grupos_atuais if g[0] == grupo_id), None)
+        gasto_atual = Decimal(str(gasto_atual_row[2])) if gasto_atual_row else Decimal("0")
+
+        # Gasto no mês anterior
+        gasto_anterior = gastos_anteriores.get(grupo_id, Decimal("0"))
+
+        # Orçamento atual (soma dos subgrupos)
+        resultado_orcamento = await db.execute(
+            select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
+            .where(Subgrupo.grupo_id == grupo_id)
+        )
+        orcamento = resultado_orcamento.scalar()
+
+        # Acumula totais
+        total_gasto_atual += gasto_atual
+        total_orcamento_atual += orcamento
+        total_gasto_anterior += gasto_anterior
+
+        # Calcula deltas
+        delta_valor = gasto_atual - gasto_anterior
+        if gasto_anterior > 0:
+            delta_percentual = (delta_valor / gasto_anterior * 100).quantize(Decimal("0.1"))
+        else:
+            delta_percentual = None  # Novo no mês (sem gasto anterior)
+
+        # Calcula percentual de orçamento
+        if orcamento > 0:
+            percentual_orcamento = (gasto_atual / orcamento * 100).quantize(Decimal("1"))
+        else:
+            percentual_orcamento = None
+
+        # Omite grupos sem gasto em nenhum dos dois meses
+        if gasto_atual > 0 or gasto_anterior > 0:
+            grupos_comparativo.append(
+                ComparativoGrupoDTO(
+                    grupo_nome=grupo.nome,
+                    gasto_mes_atual=gasto_atual.quantize(Decimal("0.01")),
+                    orcamento_mes_atual=orcamento.quantize(Decimal("0.01")),
+                    gasto_mes_anterior=gasto_anterior if gasto_anterior > 0 else None,
+                    delta_valor=delta_valor.quantize(Decimal("0.01")),
+                    delta_percentual=delta_percentual,
+                    percentual_orcamento=percentual_orcamento,
+                )
+            )
+
+    # Calcula delta total
+    delta_total_valor = total_gasto_atual - total_gasto_anterior
+    if total_gasto_anterior > 0:
+        delta_total_percentual = (delta_total_valor / total_gasto_anterior * 100).quantize(Decimal("0.1"))
+    else:
+        delta_total_percentual = None
+
+    return ComparativoDTO(
+        mes_atual=mes_atual,
+        ano_atual=ano_atual,
+        mes_anterior=mes_anterior,
+        ano_anterior=ano_anterior,
+        grupos=grupos_comparativo,
+        total_gasto_atual=total_gasto_atual.quantize(Decimal("0.01")),
+        total_orcamento_atual=total_orcamento_atual.quantize(Decimal("0.01")),
+        total_gasto_anterior=total_gasto_anterior.quantize(Decimal("0.01")),
+        delta_total_valor=delta_total_valor.quantize(Decimal("0.01")),
+        delta_total_percentual=delta_total_percentual,
+    )
+
+
+def formatar_comparativo(comparativo: "ComparativoDTO") -> str:
+    """
+    Formata o comparativo para exibição no WhatsApp.
+    Mostra gasto, orçamento e variação vs mês anterior.
+    """
+    from app.schemas import ComparativoDTO
+
+    mes_nome_atual = _MESES[comparativo.mes_atual - 1]
+    ano_str = str(comparativo.ano_atual)[2:]
+
+    linhas = [f"📊 *Fechamento de {mes_nome_atual}/{ano_str}*\n"]
+
+    for grupo in comparativo.grupos:
+        linhas.append(f"📂 *{grupo.grupo_nome}*")
+
+        # Linha 1: gasto, orçamento e percentual
+        gasto_fmt = _fmt(grupo.gasto_mes_atual)
+        if grupo.orcamento_mes_atual > 0:
+            pct = grupo.percentual_orcamento
+            orcamento_fmt = _fmt(grupo.orcamento_mes_atual)
+            alerta = " 🚨" if pct and pct >= 100 else " ✅"
+            linhas.append(f"  Gasto: R$ {gasto_fmt} | Orçamento: R$ {orcamento_fmt} ({pct}%){alerta}")
+        else:
+            linhas.append(f"  Gasto: R$ {gasto_fmt}")
+
+        # Linha 2: comparação vs mês anterior
+        if grupo.gasto_mes_anterior is not None:
+            gasto_anterior_fmt = _fmt(grupo.gasto_mes_anterior)
+            delta_fmt = _fmt(grupo.delta_valor)
+            delta_pct = grupo.delta_percentual
+
+            # Define ícone de variação
+            if delta_pct is None or delta_pct == 0:
+                icone = "➡️"
+            elif abs(delta_pct) < 5:
+                icone = "➡️"
+            elif grupo.delta_valor > 0:
+                icone = "⬆️"
+            else:
+                icone = "⬇️"
+
+            delta_sinal = "+" if grupo.delta_valor > 0 else ""
+            if delta_pct is not None:
+                linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: R$ {gasto_anterior_fmt} → {delta_sinal}R$ {delta_fmt} ({delta_sinal}{delta_pct}%) {icone}")
+            else:
+                linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: R$ {gasto_anterior_fmt} → {delta_sinal}R$ {delta_fmt} {icone}")
+        else:
+            # Novo no mês (sem gasto anterior)
+            linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: novo neste mês")
+
+        linhas.append("")
+
+    # Total consolidado
+    linhas.append(f"💰 *Total gasto:* R$ {_fmt(comparativo.total_gasto_atual)} | *Orçamento total:* R$ {_fmt(comparativo.total_orcamento_atual)}")
+    if comparativo.total_orcamento_atual > 0:
+        pct_total = (comparativo.total_gasto_atual / comparativo.total_orcamento_atual * 100).quantize(Decimal("1"))
+        linhas.append(f"  Utilização: {pct_total}%")
+
+    # Delta total
+    if comparativo.total_gasto_anterior > 0:
+        delta_fmt = _fmt(comparativo.delta_total_valor)
+        delta_pct = comparativo.delta_total_percentual
+        delta_sinal = "+" if comparativo.delta_total_valor > 0 else ""
+
+        if delta_pct is not None and abs(delta_pct) < 5:
+            icone = "➡️"
+        elif comparativo.delta_total_valor > 0:
+            icone = "⬆️"
+        else:
+            icone = "⬇️"
+
+        if delta_pct is not None:
+            linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: {delta_sinal}R$ {delta_fmt} ({delta_sinal}{delta_pct}%) {icone}")
+        else:
+            linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: {delta_sinal}R$ {delta_fmt} {icone}")
+
+    return "\n".join(linhas)

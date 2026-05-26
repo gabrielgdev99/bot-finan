@@ -51,6 +51,51 @@ async def salvar_lancamento(
         return None
 
 
+async def salvar_lancamento_de_template(
+    template_nome: str,
+    db: AsyncSession,
+) -> Lancamento | None:
+    """Salva um lançamento usando dados de um template com data de hoje."""
+    from datetime import date
+    from app.models.template import Template
+
+    template = await db.scalar(select(Template).where(Template.nome == template_nome))
+    if not template:
+        logger.warning("Template não encontrado para lançamento | nome=%s", template_nome)
+        return None
+
+    hoje = date.today()
+    # Hash único para cada uso do template (inclui a data de hoje no hash para evitar duplicação no mesmo dia)
+    hash_msg = _hash(f"{template_nome}_{hoje.isoformat()}")
+
+    duplicata = await db.scalar(select(Lancamento).where(Lancamento.hash_msg == hash_msg))
+    if duplicata:
+        logger.info("Lançamento de template duplicado ignorado | template=%s | data=%s", template_nome, hoje)
+        return None
+
+    lancamento = Lancamento(
+        data_gasto=hoje,
+        descricao=template.descricao,
+        valor=template.valor,
+        grupo_id=template.subgrupo.grupo_id,
+        subgrupo_id=template.subgrupo_id,
+        cartao=template.cartao,
+        data_pagamento=hoje,
+        hash_msg=hash_msg,
+    )
+    db.add(lancamento)
+
+    try:
+        await db.commit()
+        await db.refresh(lancamento)
+        logger.info("Lançamento de template salvo | id=%s | template=%s | valor=%s", lancamento.id, template_nome, template.valor)
+        return lancamento
+    except IntegrityError:
+        await db.rollback()
+        logger.warning("Conflito de hash ao salvar lançamento de template | template=%s", template_nome)
+        return None
+
+
 async def definir_orcamento(dto: OrcamentoDTO, db: AsyncSession) -> Subgrupo:
     grupo = await _obter_ou_criar_grupo(dto.grupo, db)
     subgrupo = await _obter_ou_criar_subgrupo(dto.subgrupo, grupo.id, db)

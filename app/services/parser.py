@@ -2,7 +2,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from app.schemas import CancelaDTO, LancamentoDTO, OrcamentoDTO, RelatorioCartaoDTO, ResumoComandoDTO, UltimosDTO
+from app.schemas import CancelaDTO, HistoricoComandoDTO, LancamentoDTO, OrcamentoDTO, RelatorioCartaoDTO, ResumoComandoDTO, TemplateDTO, RemoveTemplateDTO, UltimosDTO
 
 _ORCAMENTO_RE = re.compile(
     r"^or[cç]amento:\s*(.+?)\s*-\s*(.+?)\s*-\s*([\d]+(?:[.,]\d+)?)\s*$",
@@ -13,9 +13,15 @@ _CARTAO_CMD_RE = re.compile(
     re.IGNORECASE,
 )
 _RESUMO_CMD_RE = re.compile(r"^resumo(?::\s*(.+))?\s*$", re.IGNORECASE)
+_HISTORICO_CMD_RE = re.compile(r"^historico:\s*(.+)$", re.IGNORECASE)
 _MES_ANO_RE = re.compile(r"^(\d{2})/(\d{2})$")
 _ULTIMOS_RE = re.compile(r"^ultimos:\s*(\d+)\s*$", re.IGNORECASE)
 _CANCELA_RE = re.compile(r"^cancela:\s*(\d+)\s*$", re.IGNORECASE)
+_TEMPLATE_RE = re.compile(
+    r"^template:\s*(.+?)\s*-\s*(.+?)\s*-\s*([\d]+(?:[.,]\d+)?)\s*-\s*(.+?)\s*-\s*(.+?)(?:\s*-\s*cartao:\s*(.+))?\s*$",
+    re.IGNORECASE,
+)
+_REMOVE_TEMPLATE_RE = re.compile(r"^remove\s+template:\s*(.+?)\s*$", re.IGNORECASE)
 
 _CAMPO_RE = re.compile(r"^([\w\s]+):\s*(.+)$")
 
@@ -123,6 +129,72 @@ def parse_orcamento(texto: str) -> OrcamentoDTO | None:
         return None
 
     return OrcamentoDTO(grupo=grupo, subgrupo=subgrupo, valor=valor)
+
+
+def parse_template(texto: str) -> TemplateDTO | None:
+    match = _TEMPLATE_RE.match(texto.strip())
+    if not match:
+        return None
+
+    nome = match.group(1).strip()
+    descricao = match.group(2).strip()
+    valor = _parse_decimal(match.group(3))
+    grupo = match.group(4).strip()
+    subgrupo = match.group(5).strip()
+    cartao = match.group(6).strip() if match.group(6) else None
+
+    if not nome or not descricao or valor is None or valor <= 0 or not grupo or not subgrupo:
+        return None
+    if ":" in grupo or ":" in subgrupo:
+        return None
+
+    return TemplateDTO(
+        nome=nome,
+        descricao=descricao,
+        valor=valor,
+        grupo=grupo,
+        subgrupo=subgrupo,
+        cartao=cartao,
+    )
+
+
+def parse_remove_template(texto: str) -> RemoveTemplateDTO | None:
+    match = _REMOVE_TEMPLATE_RE.match(texto.strip())
+    if not match:
+        return None
+    nome = match.group(1).strip()
+    if not nome:
+        return None
+    return RemoveTemplateDTO(nome=nome)
+
+
+def parse_historico(texto: str) -> HistoricoComandoDTO | None:
+    """
+    Parseia comando de histórico.
+
+    Formatos aceitos:
+    - historico: Alimentação
+    - historico: Alimentação > Mercado
+    """
+    match = _HISTORICO_CMD_RE.match(texto.strip())
+    if not match:
+        return None
+
+    arg = match.group(1).strip()
+    if not arg:
+        return None
+
+    # Detecta se há '>' para separar grupo e subgrupo
+    if " > " in arg:
+        partes = arg.split(" > ", 1)
+        grupo = partes[0].strip()
+        subgrupo = partes[1].strip()
+        if not grupo or not subgrupo:
+            return None
+        return HistoricoComandoDTO(grupo=grupo, subgrupo=subgrupo)
+    else:
+        # Apenas grupo
+        return HistoricoComandoDTO(grupo=arg)
 
 
 def _parse_data_gasto(texto: str) -> date | None:

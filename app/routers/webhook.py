@@ -7,10 +7,13 @@ from app.core.config import settings
 from app.services.parser import (
     parse_ajuda,
     parse_cancela,
+    parse_historico,
     parse_lancamento,
     parse_orcamento,
     parse_relatorio_cartao,
+    parse_remove_template,
     parse_resumo_comando,
+    parse_template,
     parse_ultimos,
 )
 
@@ -57,6 +60,12 @@ def _detectar_tipo(texto: str) -> str:
     t = texto.strip()
     if parse_ajuda(t):
         return "ajuda"
+    if parse_template(t) is not None:
+        return "template"
+    if parse_remove_template(t) is not None:
+        return "remove_template"
+    if t.lower() == "templates":
+        return "templates"
     if parse_lancamento(t) is not None:
         return "lancamento"
     if parse_orcamento(t) is not None:
@@ -65,11 +74,14 @@ def _detectar_tipo(texto: str) -> str:
         return "cartao"
     if parse_resumo_comando(t) is not None:
         return "resumo_comando"
+    if parse_historico(t) is not None:
+        return "historico"
     if parse_ultimos(t) is not None:
         return "ultimos"
     if parse_cancela(t) is not None:
         return "cancela"
-    return "desconhecido"
+    # Último: tenta resolver como nome de template (pode ser lançamento de template)
+    return "possivel_template"
 
 
 @router.post("/whatsapp")
