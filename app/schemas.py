@@ -13,6 +13,8 @@ class LancamentoDTO:
     data_pagamento: date
     cartao: str | None = None
     texto_original: str = field(default="", repr=False)
+    parcelas: int = 1
+    inicio_parcela: date | None = None
 
 
 @dataclass
@@ -20,6 +22,7 @@ class OrcamentoDTO:
     grupo: str
     subgrupo: str
     valor: Decimal
+    mes: date | None = None
 
 
 @dataclass
@@ -118,3 +121,35 @@ class TemplateDTO:
 @dataclass
 class RemoveTemplateDTO:
     nome: str
+
+
+@dataclass
+class ResumoPeriodoDTO:
+    data_inicio: date
+    data_fim: date
+
+
+@dataclass
+class ResumoPeriodoGrupoDTO:
+    grupo_nome: str
+    por_subgrupo: list[tuple[str, Decimal]]
+    total_grupo: Decimal
+
+
+@dataclass
+class AliasDTO:
+    palavra_chave: str
+    grupo: str
+    subgrupo: str
+
+
+@dataclass
+class RemoveAliasDTO:
+    palavra_chave: str
+
+
+@dataclass
+class AliasInfoDTO:
+    palavra_chave: str
+    grupo_nome: str
+    subgrupo_nome: str

@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.grupo import Grupo
 from app.models.lancamento import Lancamento
+from app.models.orcamento_mensal import OrcamentoMensal
 from app.models.subgrupo import Subgrupo
-from app.schemas import HistoricoMesDTO, LancamentoInfo, ProjecaoDTO
+from app.schemas import HistoricoMesDTO, LancamentoInfo, ProjecaoDTO, ResumoPeriodoGrupoDTO
 
 _MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
 
@@ -63,14 +64,30 @@ class ResumoCartaoDTO:
     por_grupo: list[tuple[str, Decimal]]
 
 
+async def _obter_orcamento_grupo(grupo_id: int, mes: int, ano: int, db: AsyncSession) -> Decimal:
+    data_mes = date(ano, mes, 1)
+    orcamento_especifico = await db.scalar(
+        select(OrcamentoMensal.valor).where(
+            OrcamentoMensal.grupo_id == grupo_id,
+            OrcamentoMensal.mes == data_mes,
+        )
+    )
+    if orcamento_especifico:
+        return Decimal(str(orcamento_especifico))
+    resultado_generico = await db.execute(
+        select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
+        .where(Subgrupo.grupo_id == grupo_id)
+    )
+    return Decimal(str(resultado_generico.scalar()))
+
+
 async def calcular_resumo(grupo_nome: str, mes: int, ano: int, db: AsyncSession) -> ResumoDTO:
     resultado = await db.execute(
         select(
             func.coalesce(func.sum(Lancamento.valor), Decimal("0")),
-            func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0"))
+            Grupo.id
         )
         .join(Grupo, Lancamento.grupo_id == Grupo.id)
-        .join(Subgrupo, Lancamento.subgrupo_id == Subgrupo.id)
         .where(
             Grupo.nome == grupo_nome,
             extract("month", Lancamento.data_pagamento) == mes,
@@ -81,16 +98,13 @@ async def calcular_resumo(grupo_nome: str, mes: int, ano: int, db: AsyncSession)
     row = resultado.first()
 
     if row:
-        total_gasto, orcamento_mensal = row
+        total_gasto, grupo_id = row
+        orcamento_mensal = await _obter_orcamento_grupo(grupo_id, mes, ano, db)
     else:
         total_gasto = Decimal("0")
         grupo = await db.scalar(select(Grupo).where(Grupo.nome == grupo_nome))
         if grupo:
-            resultado_orcamento = await db.execute(
-                select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
-                .where(Subgrupo.grupo_id == grupo.id)
-            )
-            orcamento_mensal = resultado_orcamento.scalar()
+            orcamento_mensal = await _obter_orcamento_grupo(grupo.id, mes, ano, db)
         else:
             orcamento_mensal = Decimal("0")
 
@@ -121,16 +135,12 @@ async def calcular_resumo_todos(mes: int, ano: int, db: AsyncSession) -> list[Re
     resumos = []
     for row in rows:
         grupo_nome, grupo_id, total_gasto = row
-        resultado_orcamento = await db.execute(
-            select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
-            .where(Subgrupo.grupo_id == grupo_id)
-        )
-        orcamento_mensal = resultado_orcamento.scalar()
+        orcamento_mensal = await _obter_orcamento_grupo(grupo_id, mes, ano, db)
         resumos.append(
             ResumoDTO(
                 grupo_nome=grupo_nome,
                 total_gasto=Decimal(str(total_gasto)),
-                orcamento_mensal=Decimal(str(orcamento_mensal)),
+                orcamento_mensal=orcamento_mensal,
             )
         )
     return resumos
@@ -158,11 +168,7 @@ async def calcular_resumo_subgrupos(grupo_nome: str, mes: int, ano: int, db: Asy
 
     grupo = await db.scalar(select(Grupo).where(Grupo.nome == grupo_nome))
     if grupo:
-        resultado_orcamento = await db.execute(
-            select(func.coalesce(func.sum(Subgrupo.orcamento_mensal), Decimal("0")))
-            .where(Subgrupo.grupo_id == grupo.id)
-        )
-        orcamento = resultado_orcamento.scalar()
+        orcamento = await _obter_orcamento_grupo(grupo.id, mes, ano, db)
     else:
         orcamento = Decimal("0")
 
@@ -213,8 +219,13 @@ def formatar_resumo_lancamento(resumo: ResumoDTO, lancamento_id: int) -> str:
     return "\n".join(linhas)
 
 
-def formatar_confirmacao_orcamento(grupo_nome: str, subgrupo_nome: str, valor: Decimal) -> str:
-    return f'✅ Orçamento de "{grupo_nome} > {subgrupo_nome}" definido: R$ {_fmt(valor)}/mês'
+def formatar_confirmacao_orcamento(grupo_nome: str, subgrupo_nome: str, valor: Decimal, mes: date | None = None) -> str:
+    valor_fmt = _fmt(valor)
+    if mes:
+        mes_fmt = mes.strftime("%m/%Y")
+        return f'✅ Orçamento de "{grupo_nome}" para {mes_fmt} definido: R$ {valor_fmt}'
+    else:
+        return f'✅ Orçamento de "{grupo_nome}" definido: R$ {valor_fmt}/mês'
 
 
 def formatar_ajuda() -> str:
@@ -224,9 +235,20 @@ def formatar_ajuda() -> str:
         "`DD/MM/AA - descrição - valor - Grupo - Subgrupo`\n"
         "_(opcionais: `- cartao: nome` `- pagamento: DD/MM`)_\n"
         "Ex: `25/05/26 - padaria - 25 - Alimentação - Padaria`\n\n"
+        "🏷️ *Aliases (lançamento curto):*\n"
+        "`alias: padaria → Alimentação > Padaria`\n"
+        "Usar: `25/05/26 - padaria - 25` (grupo/subgrupo inferidos pelo alias)\n"
+        "Listar: `aliases` | Remover: `remove alias: padaria`\n\n"
+        "💳 *Lançamento parcelado:*\n"
+        "`DD/MM/AA - descrição - valor - Grupo - Subgrupo - parcelas: N - inicio: MM/AA`\n"
+        "_(opcionais: `- cartao: nome`)_\n"
+        "Ex: `01/05/26 - tv - 1200 - Casa - Eletrônicos - parcelas: 12 - inicio: 06/26`\n\n"
         "📋 *Orçamento:*\n"
         "`orçamento: grupo - subgrupo - valor`\n"
         "Ex: `orçamento: Alimentação - Mercado - 800`\n\n"
+        "📅 *Orçamento para mês específico:*\n"
+        "`orçamento: grupo - subgrupo - valor - mes: MM/AA`\n"
+        "Ex: `orçamento: Alimentação - Mercado - 1000 - mes: 12/26`\n\n"
         "📌 *Templates (lançamentos recorrentes):*\n"
         "`template: nome - descrição - valor - Grupo - Subgrupo`\n"
         "_(opcional: `- cartao: nome`)_\n"
@@ -585,6 +607,65 @@ def formatar_historico(
     return "\n".join(linhas)
 
 
+async def calcular_resumo_periodo(data_inicio: date, data_fim: date, db: AsyncSession) -> list[ResumoPeriodoGrupoDTO] | None:
+    resultado = await db.execute(
+        select(
+            Grupo.nome,
+            Subgrupo.nome,
+            func.sum(Lancamento.valor)
+        )
+        .join(Grupo, Lancamento.grupo_id == Grupo.id)
+        .join(Subgrupo, Lancamento.subgrupo_id == Subgrupo.id)
+        .where(
+            Lancamento.data_pagamento >= data_inicio,
+            Lancamento.data_pagamento <= data_fim,
+        )
+        .group_by(Grupo.id, Grupo.nome, Subgrupo.id, Subgrupo.nome)
+        .order_by(Grupo.nome, Subgrupo.nome)
+    )
+    rows = resultado.all()
+    if not rows:
+        return None
+
+    grupos_dict: dict[str, list[tuple[str, Decimal]]] = {}
+    for grupo_nome, subgrupo_nome, valor in rows:
+        if grupo_nome not in grupos_dict:
+            grupos_dict[grupo_nome] = []
+        grupos_dict[grupo_nome].append((subgrupo_nome, Decimal(str(valor))))
+
+    grupos = []
+    for grupo_nome in sorted(grupos_dict.keys()):
+        subgrupos = grupos_dict[grupo_nome]
+        total_grupo = sum(v for _, v in subgrupos)
+        grupos.append(
+            ResumoPeriodoGrupoDTO(
+                grupo_nome=grupo_nome,
+                por_subgrupo=subgrupos,
+                total_grupo=total_grupo,
+            )
+        )
+
+    return grupos
+
+
+def formatar_resumo_periodo(grupos: list[ResumoPeriodoGrupoDTO], data_inicio: date, data_fim: date) -> str:
+    inicio_fmt = data_inicio.strftime("%d/%m/%y").lstrip("0").replace("/0", "/")
+    fim_fmt = data_fim.strftime("%d/%m/%y").lstrip("0").replace("/0", "/")
+
+    linhas = [f"📊 Resumo: {inicio_fmt} a {fim_fmt}\n"]
+
+    total_geral = Decimal("0")
+    for grupo in grupos:
+        linhas.append(f"📂 {grupo.grupo_nome}")
+        for subgrupo_nome, valor in grupo.por_subgrupo:
+            linhas.append(f"  └ {subgrupo_nome}: R$ {_fmt(valor)}")
+        linhas.append(f"  Total: R$ {_fmt(grupo.total_grupo)}\n")
+        total_geral += grupo.total_grupo
+
+    linhas.append(f"💰 Total do período: R$ {_fmt(total_geral)}")
+    return "\n".join(linhas)
+
+
 def _fmt(valor: Decimal) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -793,4 +874,38 @@ def formatar_comparativo(comparativo: "ComparativoDTO") -> str:
         else:
             linhas.append(f"  vs {_MESES[comparativo.mes_anterior - 1]}: {delta_sinal}R$ {delta_fmt} {icone}")
 
+    return "\n".join(linhas)
+
+
+def formatar_resumo_parcelas(resumo: ResumoDTO, lancamentos: list, dto) -> str:
+    valor_total_fmt = _fmt(dto.valor)
+    valor_parcela_fmt = _fmt(dto.valor / dto.parcelas)
+    mes_inicio_fmt = f"{dto.inicio_parcela.month:02d}/{str(dto.inicio_parcela.year)[2:]}"
+
+    data_fim = dto.inicio_parcela
+    for _ in range(1, dto.parcelas):
+        mes = data_fim.month + 1
+        ano = data_fim.year
+        if mes > 12:
+            mes = 1
+            ano += 1
+        data_fim = date(ano, mes, 1)
+    mes_fim_fmt = f"{data_fim.month:02d}/{str(data_fim.year)[2:]}"
+
+    gasto_fmt = _fmt(resumo.total_gasto)
+    linhas = [
+        f"✅ {dto.parcelas} parcelas salvas!",
+        f"📦 {dto.descricao} — R$ {valor_total_fmt} em {dto.parcelas}x de R$ {valor_parcela_fmt}",
+        f"📅 Primeira parcela: {mes_inicio_fmt} | Última: {mes_fim_fmt}",
+        f"📂 {resumo.grupo_nome}: R$ {gasto_fmt} gastos em {mes_inicio_fmt}",
+    ]
+    if resumo.tem_orcamento:
+        pct = resumo.percentual
+        orcamento_fmt = _fmt(resumo.orcamento_mensal)
+        restante_fmt = _fmt(resumo.restante)
+        linhas.append(f"📊 Orçamento: R$ {orcamento_fmt} | Gasto: R$ {gasto_fmt} | Restante: R$ {restante_fmt} ({pct}%)")
+        if resumo.alerta == "estourado":
+            linhas.append("🚨 Orçamento estourado!")
+        elif resumo.alerta == "aviso":
+            linhas.append(f"⚠️ Atenção: {pct}% do orçamento utilizado")
     return "\n".join(linhas)

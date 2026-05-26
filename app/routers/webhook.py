@@ -5,14 +5,19 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services.parser import (
+    detectar_erro_parcelas,
     parse_ajuda,
+    parse_alias,
     parse_cancela,
     parse_historico,
     parse_lancamento,
+    parse_lancamento_multiplo,
     parse_orcamento,
     parse_relatorio_cartao,
+    parse_remove_alias,
     parse_remove_template,
     parse_resumo_comando,
+    parse_resumo_periodo,
     parse_template,
     parse_ultimos,
 )
@@ -60,18 +65,30 @@ def _detectar_tipo(texto: str) -> str:
     t = texto.strip()
     if parse_ajuda(t):
         return "ajuda"
+    if parse_alias(t) is not None:
+        return "alias"
+    if parse_remove_alias(t) is not None:
+        return "remove_alias"
+    if t.lower() == "aliases":
+        return "list_aliases"
     if parse_template(t) is not None:
         return "template"
     if parse_remove_template(t) is not None:
         return "remove_template"
     if t.lower() == "templates":
         return "templates"
+    if detectar_erro_parcelas(t):
+        return "erro_parcelas"
+    if parse_lancamento_multiplo(t) is not None:
+        return "lancamento_multiplo"
     if parse_lancamento(t) is not None:
         return "lancamento"
     if parse_orcamento(t) is not None:
         return "orcamento"
     if parse_relatorio_cartao(t) is not None:
         return "cartao"
+    if parse_resumo_periodo(t) is not None:
+        return "resumo_periodo"
     if parse_resumo_comando(t) is not None:
         return "resumo_comando"
     if parse_historico(t) is not None:

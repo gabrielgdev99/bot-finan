@@ -1,15 +1,19 @@
 import hashlib
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.alias import Alias
 from app.models.grupo import Grupo
 from app.models.lancamento import Lancamento
+from app.models.orcamento_mensal import OrcamentoMensal
 from app.models.subgrupo import Subgrupo
 from app.schemas import LancamentoDTO, LancamentoInfo, OrcamentoDTO
+from app.services import alias as alias_service
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +21,7 @@ logger = logging.getLogger(__name__)
 async def salvar_lancamento(
     dto: LancamentoDTO,
     db: AsyncSession,
-) -> Lancamento | None:
+) -> Lancamento | list[Lancamento] | None:
     hash_msg = _hash(dto.texto_original)
 
     duplicata = await db.scalar(select(Lancamento).where(Lancamento.hash_msg == hash_msg))
@@ -25,8 +29,28 @@ async def salvar_lancamento(
         logger.info("Lançamento duplicado ignorado | hash=%s", hash_msg)
         return None
 
-    grupo = await _obter_ou_criar_grupo(dto.grupo, db)
-    subgrupo = await _obter_ou_criar_subgrupo(dto.subgrupo, grupo.id, db)
+    grupo_nome = dto.grupo
+    subgrupo_nome = dto.subgrupo
+
+    if not grupo_nome or not subgrupo_nome:
+        alias = await alias_service.resolver_alias(dto.descricao, db)
+        if alias:
+            grupo_nome = alias.subgrupo.grupo.nome
+            subgrupo_nome = alias.subgrupo.nome
+            logger.info("Alias resolvido | palavra_chave=%s | grupo=%s | subgrupo=%s", dto.descricao, grupo_nome, subgrupo_nome)
+        else:
+            logger.warning("Grupo/subgrupo ausentes e alias não encontrado | descricao=%s", dto.descricao)
+            return None
+
+    grupo = await _obter_ou_criar_grupo(grupo_nome, db)
+    subgrupo = await _obter_ou_criar_subgrupo(subgrupo_nome, grupo.id, db)
+
+    if dto.parcelas > 1:
+        lancamentos = await _salvar_parcelas(
+            dto, grupo.id, subgrupo.id, hash_msg, db
+        )
+        logger.info("Lançamento parcelado salvo | parcelas=%d | grupo=%s | valor_total=%s", dto.parcelas, dto.grupo, dto.valor)
+        return lancamentos
 
     lancamento = Lancamento(
         data_gasto=dto.data_gasto,
@@ -99,10 +123,26 @@ async def salvar_lancamento_de_template(
 async def definir_orcamento(dto: OrcamentoDTO, db: AsyncSession) -> Subgrupo:
     grupo = await _obter_ou_criar_grupo(dto.grupo, db)
     subgrupo = await _obter_ou_criar_subgrupo(dto.subgrupo, grupo.id, db)
-    subgrupo.orcamento_mensal = dto.valor
+
+    if dto.mes:
+        orcamento_mensal = await db.scalar(
+            select(OrcamentoMensal).where(
+                OrcamentoMensal.grupo_id == grupo.id,
+                OrcamentoMensal.mes == dto.mes,
+            )
+        )
+        if orcamento_mensal:
+            orcamento_mensal.valor = dto.valor
+        else:
+            orcamento_mensal = OrcamentoMensal(grupo_id=grupo.id, mes=dto.mes, valor=dto.valor)
+            db.add(orcamento_mensal)
+        logger.info("Orçamento mensal definido | grupo=%s | mes=%s | valor=%s", dto.grupo, dto.mes, dto.valor)
+    else:
+        subgrupo.orcamento_mensal = dto.valor
+        logger.info("Orçamento genérico definido | grupo=%s | subgrupo=%s | valor=%s", dto.grupo, dto.subgrupo, dto.valor)
+
     await db.commit()
     await db.refresh(subgrupo)
-    logger.info("Orçamento definido | grupo=%s | subgrupo=%s | valor=%s", dto.grupo, dto.subgrupo, dto.valor)
     return subgrupo
 
 
@@ -166,3 +206,62 @@ async def cancelar_lancamento(lancamento_id: int, db: AsyncSession) -> Lancament
 
 def _hash(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+async def _salvar_parcelas(
+    dto: LancamentoDTO,
+    grupo_id: int,
+    subgrupo_id: int,
+    hash_base: str,
+    db: AsyncSession,
+) -> list[Lancamento] | None:
+    valor_parcela = (dto.valor / dto.parcelas).quantize(Decimal("0.01"))
+    lancamentos_salvos = []
+
+    data_pagamento = dto.inicio_parcela
+    for i in range(1, dto.parcelas + 1):
+        hash_msg = _hash(f"{hash_base}_{i}")
+
+        duplicata = await db.scalar(select(Lancamento).where(Lancamento.hash_msg == hash_msg))
+        if duplicata:
+            await db.rollback()
+            logger.warning("Parcela duplicada durante salvar | hash=%s", hash_msg)
+            return None
+
+        descricao_parcela = f"{dto.descricao} ({i}/{dto.parcelas})"
+
+        lancamento = Lancamento(
+            data_gasto=dto.data_gasto,
+            descricao=descricao_parcela,
+            valor=valor_parcela,
+            grupo_id=grupo_id,
+            subgrupo_id=subgrupo_id,
+            cartao=dto.cartao,
+            data_pagamento=data_pagamento,
+            hash_msg=hash_msg,
+        )
+        db.add(lancamento)
+        lancamentos_salvos.append(lancamento)
+
+        if i < dto.parcelas:
+            data_pagamento = _proximo_mes(data_pagamento)
+
+    try:
+        await db.commit()
+        for lancamento in lancamentos_salvos:
+            await db.refresh(lancamento)
+        return lancamentos_salvos
+    except IntegrityError:
+        await db.rollback()
+        logger.warning("Conflito de integridade ao salvar parcelas | hash_base=%s", hash_base)
+        return None
+
+
+def _proximo_mes(data):
+    from datetime import date
+    mes = data.month + 1
+    ano = data.year
+    if mes > 12:
+        mes = 1
+        ano += 1
+    return date(ano, mes, 1)

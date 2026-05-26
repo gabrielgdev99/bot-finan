@@ -12,3 +12,4 @@ class Grupo(Base):
 
     subgrupos: Mapped[list["Subgrupo"]] = relationship(back_populates="grupo")
     lancamentos: Mapped[list["Lancamento"]] = relationship(back_populates="grupo")
+    orcamentos_mensais: Mapped[list["OrcamentoMensal"]] = relationship(back_populates="grupo")

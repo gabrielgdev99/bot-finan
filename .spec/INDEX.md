@@ -57,25 +57,25 @@
 |------|-----------|--------|
 | SUBGRUPO-T001 | Subgrupos como entidade com orçamento próprio | [x] Concluída |
 
-### Épico: Gestão de Orçamento (Bloqueada por SUBGRUPO-T001)
+### Épico: Gestão de Orçamento
 
 | Task | Descrição | Status |
 |------|-----------|--------|
-| ORCA-T001 | Orçamento mensal por mês/ano específico | [ ] Não iniciada |
+| ORCA-T001 | Orçamento mensal por mês/ano específico | [x] Concluída |
 
-### Épico: Lançamentos Avançados (Backlog)
+### Épico: Lançamentos Avançados
 
 | Task | Descrição | Status |
 |------|-----------|--------|
-| PARCELA-T001 | Lançamento de compra parcelada | [ ] Não iniciada |
+| PARCELA-T001 | Lançamento de compra parcelada | [x] Concluída |
 
 ### Épico: Inteligência do Parser (Backlog — depende de SUBGRUPO-T001)
 
 | Task | Descrição | Status |
 |------|-----------|--------|
-| ALIAS-T001 | Aliases para categorização automática de lançamentos | [ ] Não iniciada |
+| ALIAS-T001 | Aliases para categorização automática de lançamentos | [x] Concluída |
 | TEMPLATE-T001 | Templates para lançamentos fixos recorrentes | [x] Concluída |
-| MULTI-T001 | Lançamento múltiplo numa mensagem | [ ] Não iniciada |
+| MULTI-T001 | Lançamento múltiplo numa mensagem | [x] Concluída |
 
 ### Épico: Inteligência Analítica (Backlog)
 
@@ -85,7 +85,7 @@
 | COMPARE-T001 | Comparativo mensal automático no dia 1 | [x] Concluída |
 | HISTORICO-T001 | Histórico mensal de grupo ou subgrupo | [x] Concluída |
 | LEMBRETE-T001 | Lembretes de contas vinculados a templates | [ ] Não iniciada |
-| PERIODO-T001 | Resumo por período customizado | [ ] Não iniciada |
+| PERIODO-T001 | Resumo por período customizado | [x] Concluída |
 
 ## Arquivos de contexto disponíveis
 Não carregue esses arquivos automaticamente.

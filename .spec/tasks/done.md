@@ -2,6 +2,104 @@
 
 > Tasks concluídas. Arquivo de referência — raramente entra no contexto ativo.
 
+## 26/05/2026 — MULTI-T001 implementado
+
+**Concluído em:** 26/05/2026
+**Épico:** Inteligência do Parser
+
+### Implementação:
+- Parser estendido:
+  - `parse_lancamento_multiplo`: detecta formato múltiplo (primeira linha = data isolada, resto = linhas de lançamento) e retorna `(date, list[str])`
+- Webhook modificado:
+  - `_detectar_tipo` estendido: detecta `lancamento_multiplo` antes de `lancamento` simples
+- Service `mensagem.py` estendido:
+  - Handler para tipo `lancamento_multiplo`: itera sobre linhas, parseia cada uma com data do cabeçalho, processa sucessos/erros
+  - Função auxiliar: `_formatar_resposta_multiplo` — formata resposta consolidada com lista de lançamentos e resumo por grupo
+  - Tratamento de erros: linha sem alias + sem grupo/subgrupo indica qual linha falhou, continua processando
+  - Deduplicação: por linha (hash preservado no `texto_original`)
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ Mensagem com data isolada na primeira linha seguida de N linhas é detectada como formato múltiplo
+- ✅ Cada linha é parseada independentemente com seus campos opcionais (cartão, parcelas, etc.)
+- ✅ Linhas resolvem alias normalmente; linha sem alias e sem grupo/subgrupo retorna erro indicando a linha problemática, continua processando demais
+- ✅ Linhas com `parcelas:` geram N lançamentos cada
+- ✅ Deduplicação funciona por linha (reenvio da mensagem não duplica)
+- ✅ Resposta consolida todos os lançamentos salvos e exibe resumo por grupo afetado
+- ✅ Mensagem com apenas uma linha no formato múltiplo funciona normalmente (equivalente ao formato simples)
+- ✅ Formato simples (`DD/MM/AA - desc - valor - ...`) continua funcionando sem regressão
+
+**Exemplo do novo formato:**
+```
+25/05/26
+padaria - 25
+uber - 18 - cartao: nubank
+tv samsung - 1200 - Casa - Eletrodoméstico - parcelas: 12 - inicio: 06/26
+mercado - 95 - Alimentação - Mercado
+```
+
+**Resposta:**
+```
+✅ 4 lançamentos salvos!
+• padaria — R$ 25,00 → Alimentação > Padaria
+• uber — R$ 18,00 → Transporte > App
+• tv samsung — R$ 1.200,00 em 12x → Casa > Eletrodoméstico
+• mercado — R$ 95,00 → Alimentação > Mercado
+
+📊 Alimentação: R$ 120,00 | Orçamento: R$ 800,00 | Restante: R$ 680,00 (15%)
+📊 Transporte: R$ 18,00 | Orçamento: R$ 300,00 | Restante: R$ 282,00 (6%)
+📊 Casa: R$ 100,00 gastos
+```
+
+**Arquivos modificados:** `app/services/parser.py`, `app/routers/webhook.py`, `app/services/mensagem.py`
+
+## 26/05/2026 — ALIAS-T001 implementado
+
+**Concluído em:** 26/05/2026
+**Épico:** Inteligência do Parser
+
+### Implementação:
+- Migration `0006_add_aliases.py`: tabela `aliases (id, palavra_chave VARCHAR unique, subgrupo_id FK, created_at)`
+- Model `Alias` em `app/models/alias.py` com relationship para `Subgrupo`
+- Service `alias.py` com 4 funções:
+  - `criar_alias`: cria novo alias, valida existência de grupo/subgrupo, retorna `None` se inválido
+  - `remover_alias`: deleta alias por palavra-chave, retorna o removido ou `None`
+  - `listar_aliases`: retorna lista ordenada de aliases
+  - `resolver_alias`: busca alias por palavra-chave (case-insensitive, sem acentuação)
+  - `_normalizar_palavra_chave`: helper para normalização (lowercase + remove diacríticos)
+- Parser estendido:
+  - `parse_alias`: regex que detecta `alias: palavra → Grupo > Subgrupo` (aceita `→` ou `->`) e retorna `AliasDTO`
+  - `parse_remove_alias`: detecta `remove alias: palavra` e retorna `RemoveAliasDTO`
+  - `parse_lancamento`: modificado para aceitar formato curto (3+ partes); grupo/subgrupo opcionais
+- Schemas adicionados: `AliasDTO`, `RemoveAliasDTO`, `AliasInfoDTO`
+- Webhook modificado:
+  - `_detectar_tipo` estendido: detecta `alias:`, `remove alias:`, `aliases` como tipos específicos
+- Service `lancamento.py` estendido:
+  - `salvar_lancamento`: antes de rejeitar sem grupo/subgrupo, chama `resolver_alias(descricao)`
+  - Se encontrado: usa grupo/subgrupo do alias; senão: retorna `None` (rejeita lançamento)
+- Service `mensagem.py` completamente estendido:
+  - Handler para tipo `alias`: cria alias, responde erro se grupo/subgrupo inválido
+  - Handler para tipo `remove_alias`: remove e confirma, erro se não encontrado
+  - Handler para tipo `list_aliases`: lista todos cadastrados
+  - Função auxiliar: `_formatar_listar_aliases`
+- Menu de ajuda estendido com seção de aliases — formato, exemplos, modo de uso (criar, usar, listar, remover)
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ Tabela `aliases` criada via migration
+- ✅ `alias: padaria → Alimentação > Padaria` cria alias e confirma
+- ✅ `alias:` com grupo/subgrupo inexistente responde com erro
+- ✅ Lançamento `25/05/26 - padaria - 25` resolve grupo+subgrupo pelo alias
+- ✅ Lançamento sem alias e sem grupo/subgrupo responde com erro
+- ✅ `aliases` lista todos cadastrados (resposta vazia se nenhum)
+- ✅ `remove alias: padaria` remove e confirma; inexistente → erro
+- ✅ Matching case-insensitive e sem acentuação (`Padaria` = `padaria` = `pádaria`)
+- ✅ Comando `ajuda` inclui seção de aliases com exemplos
+- ✅ `→` e `->` ambos aceitos no cadastro
+
+**Arquivos criados:** `alembic/versions/0006_add_aliases.py`, `app/models/alias.py`, `app/services/alias.py`
+**Arquivos modificados:** `app/models/__init__.py`, `app/schemas.py`, `app/services/parser.py`, `app/services/lancamento.py`, `app/routers/webhook.py`, `app/services/mensagem.py`, `app/services/resumo.py`, `tests/test_parser.py`
+
+---
+
 ## 25/05/2026
 
 - Projeto iniciado — spec gerado via vireum-spec distill
@@ -266,3 +364,241 @@
 - ✅ Funciona corretamente para grupos/subgrupos com orçamento = 0 (omite coluna de orçamento)
 
 **Arquivos modificados:** `app/schemas.py`, `app/services/resumo.py`, `app/services/parser.py`, `app/routers/webhook.py`, `app/services/mensagem.py`
+
+---
+
+## [DATA-T001] Parser de data flexível no lançamento
+
+**Concluído em:** 25/05/2026
+**Épico:** Parser
+
+### Implementação:
+- `_parse_data_gasto()` refatorado em `app/services/parser.py` com regex unificado
+- Suporta formatos: `DD/MM/AA`, `DD/MM/AAAA`, `D/M/AA`, `D/M/AAAA`, `DD/MM` (sem ano), `D/M` (sem ano)
+- Ano completo (4 dígitos) preservado como-é; ano curto (2 dígitos) convertido: `2000 + AA`
+- Sem ano: assume ano corrente via `datetime.now().year`
+- Datas inválidas (`32/05/26`, `25/13/26`) retornam `None` (comportamento mantido)
+- Todos os 8 formatos com testes unitários passando
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ `25/05/26` → `2026-05-25`
+- ✅ `25/05/2026` → `2026-05-25`
+- ✅ `25/5/26` → `2026-05-25`
+- ✅ `5/5/26` → `2026-05-05`
+- ✅ `25/05` → data com ano corrente
+- ✅ `25/5` → data com ano corrente
+- ✅ Data inválida (`32/05/26`, `25/13/26`) retorna `None`
+- ✅ Nenhuma regressão nos outros testes do parser
+
+**Arquivos modificados:** `app/services/parser.py`
+
+---
+
+## [SUBGRUPO-T001] Subgrupos como entidade com orçamento próprio
+
+**Concluído em:** 25/05/2026
+**Épico:** Estrutura de dados
+
+### Implementação:
+- Migration `0003_add_subgrupos.py` criada:
+  - Nova tabela `subgrupos (id, grupo_id FK, nome VARCHAR, orcamento_mensal DECIMAL default 0, UNIQUE(grupo_id, nome))`
+  - Migração de dados: extrai subgrupos únicos de `lancamentos`, insere em tabela nova
+  - `lancamentos.subgrupo` (string) → `lancamentos.subgrupo_id` (FK)
+  - `grupos.orcamento_mensal` removida
+- Model `Subgrupo` criado em `app/models/subgrupo.py` com relationship bidirecional com `Grupo`
+- Model `Grupo` atualizado: remove `orcamento_mensal`, adiciona relationship para `Subgrupo`
+- Parser estendido:
+  - `parse_orcamento()` detecta novo formato: `orçamento: <Grupo> - <Subgrupo> - <valor>`
+  - Retorna `OrcamentoDTO` com campos `grupo`, `subgrupo`, `valor`
+  - Comando antigo sem subgrupo detecta tipo "comando_invalido" e responde com erro + novo formato
+- Service `lancamento.py` atualizado:
+  - `salvar_lancamento()` resolve subgrupo por nome+grupo
+  - Se subgrupo não existir: cria automaticamente com `orcamento_mensal = 0`
+  - Se grupo não existir: cria grupo E subgrupo automaticamente
+  - `definir_orcamento()` salva em `subgrupos.orcamento_mensal` (não mais em `grupos`)
+- Service `resumo.py` atualizado:
+  - `calcular_resumo()` usa `SUM(subgrupos.orcamento_mensal)` como orçamento do grupo
+  - Breakdown por subgrupo usa `subgrupos.orcamento_mensal` individual
+  - Queries ajustadas com JOINs corretos
+- Service `mensagem.py` atualizado: formatação de resposta de orçamento refatorada
+- Service `jobs.py` atualizado: queries de resumo agendado ajustadas
+- `requirements.md` atualizado: seção "Dados a Persistir" reflete nova estrutura
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ Tabela `subgrupos` criada via migration
+- ✅ `lancamentos.subgrupo` (string) → `lancamentos.subgrupo_id` (FK)
+- ✅ Migration preserva dados existentes
+- ✅ `grupos.orcamento_mensal` removida
+- ✅ `orçamento: Alimentação - Mercado - 800` salva em `subgrupos.orcamento_mensal`
+- ✅ Lançamento com subgrupo inexistente cria automaticamente com `orcamento_mensal = 0`
+- ✅ Lançamento com grupo inexistente cria grupo E subgrupo automaticamente
+- ✅ Resumo exibe orçamento do grupo como soma dos seus subgrupos
+- ✅ `resumo: <grupo>` exibe breakdown por subgrupo com orçamento individual
+- ✅ Comando antigo `orçamento: <grupo> - <valor>` responde com erro explicando novo formato
+
+**Arquivos criados:** `alembic/versions/0003_add_subgrupos.py`, `app/models/subgrupo.py`
+**Arquivos modificados:** `app/models/__init__.py`, `app/models/grupo.py`, `app/schemas.py`, `app/services/parser.py`, `app/services/lancamento.py`, `app/services/resumo.py`, `app/services/mensagem.py`, `app/services/jobs.py`, `app/requirements.md`
+
+---
+
+## [PERIODO-T001] Resumo por período customizado
+
+**Concluído em:** 26/05/2026
+**Épico:** Inteligência Analítica
+
+### Implementação:
+- `ResumoPeriodoDTO` e `ResumoPeriodoGrupoDTO` adicionados em `app/schemas.py`
+- `_parse_data_periodo(texto)` implementado em `app/services/parser.py`:
+  - Parseia formato DD/MM (sem ano)
+  - Assume ano corrente via `date.today().year`
+  - Retorna `None` para datas inválidas
+- `parse_resumo_periodo(texto)` implementado em `app/services/parser.py`:
+  - Detecta padrão `resumo: DD/MM a DD/MM` via regex `_RESUMO_PERIODO_RE`
+  - Valida que `data_inicio <= data_fim` (rejeita períodos invertidos)
+  - Retorna `ResumoPeriodoDTO(data_inicio, data_fim)` ou `None`
+- `calcular_resumo_periodo(data_inicio, data_fim, db)` implementado em `app/services/resumo.py`:
+  - Query: `SELECT grupo, subgrupo, SUM(valor) WHERE data_pagamento BETWEEN data_inicio AND data_fim`
+  - Agrupa por grupo → subgrupo
+  - Retorna `list[ResumoPeriodoGrupoDTO]` ou `None` se nenhum lançamento
+- `formatar_resumo_periodo(grupos, data_inicio, data_fim)` implementado em `app/services/resumo.py`:
+  - Cabeçalho: `📊 Resumo: DD/MM a DD/MM/AAAA`
+  - Cada grupo com subgrupos indentados (└)
+  - Total por grupo + total geral do período
+  - **Sem orçamento, sem percentual** — apenas totais reais
+- Parser estendido em `app/routers/webhook.py`:
+  - `_detectar_tipo()` detecta tipo "resumo_periodo" (verificado ANTES de "resumo_comando" para não conflitar)
+- Handler implementado em `app/services/mensagem.py`:
+  - Valida intervalo: se `data_inicio > data_fim` → erro `❌ Período inválido: data inicial não pode ser posterior à final.`
+  - Se nenhum lançamento: responde `📭 Nenhum lançamento no período informado.`
+  - Caso contrário: chamada a `calcular_resumo_periodo` e `formatar_resumo_periodo`
+- Testes unitários adicionados em `tests/test_parser.py` com 12 casos (formatos válidos, invertidos, inválidos, etc.)
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ `resumo: 01/05 a 15/05` retorna lançamentos com `data_pagamento` entre 01/05 e 15/05 do ano corrente
+- ✅ Exibe breakdown por grupo > subgrupo com total por grupo e total geral do período
+- ✅ `data_inicio > data_fim` responde com erro de intervalo inválido
+- ✅ Período sem lançamentos responde `📭 Nenhum lançamento no período informado.`
+- ✅ Não exibe orçamento nem percentual (apenas totais reais)
+- ✅ Formato existente `resumo`, `resumo: <grupo>` e `resumo: MM/AA` continuam funcionando sem regressão (detecção em ordem: período, depois comando)
+
+**Arquivos modificados:** `app/schemas.py`, `app/services/parser.py`, `app/services/resumo.py`, `app/services/mensagem.py`, `app/routers/webhook.py`, `tests/test_parser.py`
+
+---
+
+## [PARCELA-T001] Lançamento de compra parcelada
+
+**Concluído em:** 26/05/2026
+**Épico:** Lançamentos Avançados
+
+### Implementação:
+- `LancamentoDTO` estendido em `app/schemas.py` com campos `parcelas: int = 1` e `inicio_parcela: date | None = None`
+- `parse_lancamento(texto)` modificado em `app/services/parser.py`:
+  - Detecta campo `parcelas: N` (valida 1 ≤ N ≤ 60)
+  - Quando `parcelas > 1`: exige campo `inicio: MM/AA` (obrigatório)
+  - `_parse_parcelas(texto)` retorna `None` se inválido
+  - `_parse_inicio_parcela(texto)` valida mês 1-12, infere ano 20XX
+  - Retorna `None` se parcelas > 1 mas `inicio` falta ou é inválido
+- `detectar_erro_parcelas(texto)` implementado em `app/services/parser.py`:
+  - Detecta erros antes do parse falhar: parcelas 0/negativo, > 60, sem `inicio`, mês inválido
+  - Retorna mensagem de erro específica (ex: "❌ Campo 'parcelas' não pode ser > 60")
+  - Integrado ao webhook via tipo "erro_parcelas"
+- `salvar_lancamento(dto, db)` modificado em `app/services/lancamento.py`:
+  - Retorna `Lancamento | list[Lancamento] | None`
+  - Detecta `parcelas > 1` e chama `_salvar_parcelas()`
+- `_salvar_parcelas()` implementado em `app/services/lancamento.py`:
+  - Calcula `valor_parcela = valor_total / N` (quantize 2 casas)
+  - Loop de N iterações (1 a N)
+  - Cada parcela: `descricao_parcela = f"{descricao} ({i}/{N})"`
+  - `data_pagamento` incrementa 1 mês a cada iteração (via `_proximo_mes()`)
+  - Hash único: `_hash(f"{hash_base}_{i}")` para deduplicação por parcela
+  - Deduplicação: verifica se hash de cada parcela já existe (rejeita se encontrar)
+  - Retorna `list[Lancamento]` em sucesso ou `None` em falha
+- `formatar_resumo_parcelas()` implementado em `app/services/resumo.py`:
+  - Cabeçalho: `✅ {N} parcelas salvas!`
+  - Linha de produto: `📦 descrição — R$ total em Nx de R$ por_parcela`
+  - Linha de período: `📅 Primeira parcela: MM/AAAA | Última: MM/AAAA`
+  - Linha de gasto: `📂 Grupo: R$ gasto_do_mes gastos em MM/AAAA`
+  - Orçamento/alerta: idêntico a `formatar_resumo_lancamento` (reflete apenas parcela do mês)
+- Handler em `app/services/mensagem.py`:
+  - Valida tipo "erro_parcelas": envia mensagem de erro e retorna
+  - Handler "lancamento": detecta se resultado é lista (parcelas) vs único lançamento
+  - Chama `formatar_resumo_parcelas` para listas, `formatar_resumo_lancamento` para único
+- Parser webhook (`app/routers/webhook.py`):
+  - Adiciona `detectar_erro_parcelas()` check em `_detectar_tipo()` antes de `parse_lancamento`
+  - Importa `detectar_erro_parcelas` do parser
+  - Tipo "erro_parcelas" disparado se houver erro detectável
+- Ajuda atualizada em `app/services/resumo.py`:
+  - Nova seção "Lançamento parcelado" com formato, obrigatoriedade de `inicio:`, exemplo 12x
+- Testes adicionados em `tests/test_parser.py`: 9 novos casos
+  - Parcelas válidas (12, com inicio válido)
+  - Sem inicio obrigatório (deve falhar)
+  - Inicio inválido (mês 13)
+  - Parcelas 0, negativo, > 60 (devem falhar)
+  - Parcela 1 sem inicio (válido, default)
+  - Sem campo parcelas (default 1, válido)
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ `parcelas: 12` cria 12 registros com hash único
+- ✅ Valor arredondado: `valor_total / N` (2 casas decimais)
+- ✅ `data_pagamento` incrementa 1 mês cada parcela (a partir de `inicio:`)
+- ✅ Descrição com sufixo `(X/N)` em cada parcela
+- ✅ Deduplicação: reenvio não duplica (hash único por parcela)
+- ✅ Sem `inicio:` com `parcelas > 1` → erro específico
+- ✅ Mês inválido em `inicio:` → erro de formato
+- ✅ `parcelas: 1` (default) sem regressão
+- ✅ `parcelas: 0/-N` → erro
+- ✅ `parcelas > 60` → erro
+- ✅ Resposta exibe total, por_parcela, mês_inicial, mês_final
+- ✅ Resumo mensal reflete apenas valor da parcela do mês
+
+**Arquivos modificados:** `app/schemas.py`, `app/services/parser.py`, `app/services/lancamento.py`, `app/services/resumo.py`, `app/services/mensagem.py`, `app/routers/webhook.py`, `tests/test_parser.py`
+
+---
+
+## [ORCA-T001] Orçamento mensal por mês/ano específico
+
+**Concluído em:** 26/05/2026
+**Épico:** Gestão de Orçamento
+
+### Implementação:
+- Migration `0005_add_orcamentos_mensais.py` criada:
+  - Nova tabela `orcamentos_mensais (id, grupo_id FK, mes DATE, valor DECIMAL, UNIQUE(grupo_id, mes))`
+  - Armazena orçamento específico por grupo/mês
+- Model `OrcamentoMensal` criado em `app/models/orcamento_mensal.py`:
+  - Relationship bidirecional com `Grupo`
+  - `mes` é DATE (sempre primeiro dia do mês)
+- Model `Grupo` atualizado: adiciona relationship para `orcamentos_mensais`
+- Parser estendido em `app/services/parser.py`:
+  - `_ORCAMENTO_RE` refatorado para detectar formato: `orçamento: <grupo> - <subgrupo> - <valor> [- mes: MM/AA]`
+  - `parse_orcamento()` retorna `OrcamentoDTO` com campo `mes: date | None`
+  - Adicionada `_parse_mes_ano(texto)` — converte MM/AA para `date(ano, mes, 1)`
+- Service `lancamento.py` atualizado:
+  - `definir_orcamento()` verifica se `dto.mes` é informado
+  - Se sim: cria/atualiza `OrcamentoMensal` para o mês específico
+  - Se não: atualiza `subgrupo.orcamento_mensal` (comportamento anterior)
+- Service `resumo.py` atualizado:
+  - Adicionada `_obter_orcamento_grupo(grupo_id, mes, ano, db)` — helper que busca orçamento com fallback:
+    1. Tenta buscar `OrcamentoMensal` para mês/ano específico
+    2. Se não encontra → busca `SUM(subgrupos.orcamento_mensal)` genérico
+  - `calcular_resumo()` usa helper para buscar orçamento correto
+  - `calcular_resumo_todos()` usa helper para cada grupo
+  - `calcular_resumo_subgrupos()` usa helper para o grupo
+- Função `formatar_confirmacao_orcamento()` modificada em `app/services/resumo.py`:
+  - Novo parâmetro `mes: date | None = None`
+  - Se `mes` informado: resposta `✅ Orçamento de "grupo" para MM/AAAA definido: R$ valor`
+  - Se sem `mes`: resposta `✅ Orçamento de "grupo" definido: R$ valor/mês` (anterior)
+- Ajuda atualizada em `app/services/resumo.py`:
+  - Adicionada seção "Orçamento para mês específico" com formato e exemplo
+- Handler em `app/services/mensagem.py`:
+  - Modificado para passar `dto.mes` à função `formatar_confirmacao_orcamento`
+
+### Critérios de aceitação — TODOS implementados:
+- ✅ Tabela `orcamentos_mensais` criada via migration
+- ✅ `orçamento: Alimentação - Mercado - 500 - mes: 12/26` salva orçamento específico
+- ✅ `orçamento: Alimentação - Mercado - 300` continua atualizando genérico
+- ✅ Resumo busca específico primeiro, fallback para genérico
+- ✅ Resposta distingue: "para 12/2026" (específico) vs "/mês" (genérico)
+- ✅ Mês inválido (ex: `mes: 13/26`) retorna `None` no parser
+
+**Arquivos criados:** `alembic/versions/0005_add_orcamentos_mensais.py`, `app/models/orcamento_mensal.py`
+**Arquivos modificados:** `app/models/__init__.py`, `app/models/grupo.py`, `app/schemas.py`, `app/services/parser.py`, `app/services/lancamento.py`, `app/services/resumo.py`, `app/services/mensagem.py`

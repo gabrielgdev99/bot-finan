@@ -29,6 +29,55 @@
 - Migrations passaram a rodar via `subprocess.run(["alembic", "upgrade", "head"])` no lifespan do FastAPI — `releaseCommand` do Railway free tier não disparava
 - Dockerfile do baileys-service corrigido: adicionado `git`, `python3`, `make`, `g++` (Alpine não inclui; Baileys precisa compilar deps nativas)
 
+## 26/05/2026 — ALIAS-T001 implementado
+- Task de sistema de aliases para categorização automática de lançamentos concluída
+- `Alias` model criado: `(id, palavra_chave VARCHAR unique, subgrupo_id FK, created_at)`
+- Service `alias.py` com CRUD: `criar_alias`, `remover_alias`, `listar_aliases`, `resolver_alias`
+- Normalização case-insensitive + sem acentuação: `unicodedata.normalize('NFD', x).encode('ascii', 'ignore')`
+- Parser estendido: `parse_alias` detecta `alias: palavra → Grupo > Subgrupo` (aceita `→` ou `->`)
+- `parse_lancamento` modificado: aceita formato curto (3+ partes) com grupo/subgrupo opcionais
+- Webhook: tipos `alias`, `remove_alias`, `list_aliases` adicionados
+- Lancamento: `salvar_lancamento` resolve alias antes de rejeitar sem grupo/subgrupo
+- Mensagem: handlers para 3 tipos de alias; seção em `formatar_ajuda()`
+- Testes: 15 novos casos em `test_parser.py` cobrindo alias, remove_alias, lançamento curto
+- Critérios de aceitação: 100% implementados
+
+---
+
+## 26/05/2026 — PARCELA-T001 implementado
+- Tarefa de lançamento parcelado concluída
+- `LancamentoDTO` estendido em schemas.py: adicionados campos `parcelas: int = 1` e `inicio_parcela: date | None = None`
+- Parser estendido: `parse_lancamento()` detecta campos `parcelas: N` (valida 1 ≤ N ≤ 60) e `inicio: MM/AA` (obrigatório quando N > 1)
+- Helpers implementados: `_parse_parcelas()` valida range e retorna None se inválido; `_parse_inicio_parcela()` valida mês 1-12, infere ano 20XX
+- Novo detector de erro: `detectar_erro_parcelas()` identifica erros antes do parse falhar (parcelas 0/-N, > 60, sem inicio, mês inválido) com mensagens específicas
+- Webhook estendido: `_detectar_tipo()` verifica "erro_parcelas" ANTES de "lancamento" para dar feedback imediato sobre erros de formato
+- Handler em mensagem.py: tipo "erro_parcelas" dispara resposta de erro e retorna; tipo "lancamento" detecta se resultado é lista (parcelas) ou Lancamento (único)
+- Serviço lancamento modificado: `salvar_lancamento()` retorna agora `Lancamento | list[Lancamento] | None`; detecta `parcelas > 1` e chama `_salvar_parcelas()`
+- `_salvar_parcelas()` implementado: calcula `valor_parcela = valor_total / N` (quantize 2 casas); loop de N iterações com `descricao_parcela = f"{desc} ({i}/{N})"`
+- `data_pagamento` incrementa 1 mês a cada iteração via `_proximo_mes()`; hash único por parcela via `_hash(f"{hash_base}_{i}")` para deduplicação
+- Deduplicação funcional: verifica se cada parcela já existe no banco (rejeita toda a operação se encontrar duplicata)
+- Resposta formatada: nova função `formatar_resumo_parcelas()` em resumo.py exibe "✅ N parcelas salvas!", produto (R$ total em Nx), período (primeira/última), gasto do mês
+- Ajuda atualizada em resumo.py: nova seção "Lançamento parcelado" com formato, obrigatoriedade de `inicio:`, exemplo 12x
+- Testes adicionados: 9 casos em test_parser.py cobrindo parcelas válidas, sem inicio obrigatório, inicio inválido, 0/-N/> 60, parcela 1 sem inicio, default 1
+- Critérios de aceitação: 100% implementados
+- Regressão testada: `parcelas: 1` (default) mantém comportamento de lançamento único sem alterações
+
+## 26/05/2026 — PERIODO-T001 implementado
+- Tarefa de resumo por período customizado concluída
+- Padrão detectado: `resumo: DD/MM a DD/MM` (assume ano corrente)
+- `ResumoPeriodoDTO` e `ResumoPeriodoGrupoDTO` adicionados em schemas.py
+- Parser estendido: `parse_resumo_periodo()` detecta padrão via regex `_RESUMO_PERIODO_RE`, valida `data_inicio <= data_fim`
+- Helper `_parse_data_periodo()` parseia formato DD/MM e assume ano corrente
+- Serviço resumo expandido: `calcular_resumo_periodo()` implementado com query `BETWEEN data_pagamento`, agrupamento por grupo>subgrupo
+- Formatação implementada: `formatar_resumo_periodo()` exibe breakdown por grupo com subgrupos indentados, total por grupo + total geral (SEM orçamento, SEM percentual)
+- Webhook estendido: `_detectar_tipo()` detecta "resumo_periodo" ANTES de "resumo_comando" (prioritário) para não conflitar com `resumo: <grupo>`
+- Handler em mensagem.py: valida intervalo, responde erro se invertido, exibe "📭 Nenhum lançamento..." se vazio
+- Testes adicionados: 12 casos de teste em test_parser.py cobrindo formatos válidos, invertidos, inválidos, sem "a", datas inválidas, etc.
+- Critérios de aceitação: 100% implementados
+- Regressão testada: `resumo`, `resumo: <grupo>`, `resumo: MM/AA` continuam funcionando
+
+---
+
 ## 25/05/2026 — TEMPLATE-T001 implementado
 - Criada tabela `templates` com migration 0004: `(id, nome VARCHAR unique, descricao, valor, subgrupo_id FK, cartao nullable)`
 - Model `Template` adicionado com relationship para `Subgrupo`
