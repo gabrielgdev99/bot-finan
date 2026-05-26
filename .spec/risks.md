@@ -19,4 +19,4 @@ Nenhum identificado
 
 | Data | Risco | Impacto | Mitigação |
 |------|-------|---------|-----------|
-|      |       |         |           |
+| 25/05/2026 | Sessão WhatsApp (Baileys) perdida em restart do Railway | Bot para de responder até novo scan do QR | Filesystem efêmero é trade-off aceito no MVP — Railway free tier raramente reinicia sem deploy |

@@ -25,6 +25,14 @@
 - Resumo mensal passa a filtrar por `data_pagamento` (antes filtrava por `data_gasto`)
 - Decisão: casal controla gastos por mês de pagamento, não de compra
 
+## 25/05/2026 — BAILEYS-T001 concluída (substitui Evolution API)
+- Criado serviço Node.js próprio com Baileys em `baileys-service/`
+- Motivo: Evolution API v2.2.3 tem bug de loop infinito de reconexão, impedia geração do QR no Railway
+- Serviço expõe: `GET /qrcode` (PNG), `POST /send`, `GET /health`
+- `app/services/whatsapp.py` ajustado para chamar `BAILEYS_SERVICE_URL/send`
+- `webhook.py` não alterado — payload encapsulado no formato `EvolutionWebhookPayload`
+- Variáveis `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE` removidas → substituídas por `BAILEYS_SERVICE_URL`
+
 ## 25/05/2026 — INPUTAR-T001 concluída (MVP implementado)
 - T001.1: setup base — FastAPI, Docker Compose, Alembic, railway.toml
 - T001.2: models SQLAlchemy 2.x async — `Grupo` e `Lancamento` + migration inicial

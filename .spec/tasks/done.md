@@ -87,3 +87,17 @@
 - Agrega gastos do mês corrente em dois níveis: grupo → subgrupo
 
 **Arquivos modificados:** `schemas.py`, `services/parser.py`, `services/resumo.py`, `services/lancamento.py`, `routers/webhook.py`, `services/mensagem.py`, `services/jobs.py` (novo), `main.py`, `requirements.txt`
+
+---
+
+## [BAILEYS-T001] Serviço Baileys customizado (substitui Evolution API)
+
+**Concluído em:** 25/05/2026
+**Épico:** Infraestrutura WhatsApp
+
+- `baileys-service/index.js`: servidor Express + Baileys com `useMultiFileAuthState`, QR via `GET /qrcode` (PNG), repasse de mensagens ao webhook FastAPI no formato compatível com `EvolutionWebhookPayload`, envio via `POST /send`
+- `baileys-service/package.json`: deps `@whiskeysockets/baileys`, `express`, `qrcode`, `pino`
+- `baileys-service/Dockerfile`: Node 20 Alpine
+- `app/core/config.py`: removidas `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`; adicionada `BAILEYS_SERVICE_URL`
+- `app/services/whatsapp.py`: ajustado para `POST BAILEYS_SERVICE_URL/send`
+- `webhook.py` não alterado — formato do payload mantido compatível

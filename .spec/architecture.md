@@ -8,7 +8,7 @@
 - **Backend:** Python 3.12 + FastAPI
 - **Banco de dados:** PostgreSQL (Railway free tier)
 - **ORM:** SQLAlchemy 2.x (async) + Alembic (migrations)
-- **WhatsApp:** Evolution API (webhook receiver + envio via httpx)
+- **WhatsApp:** Baileys (serviço Node.js próprio em `baileys-service/` — substitui Evolution API)
 - **Containerização:** Docker + Docker Compose (dev local)
 - **Hospedagem:** Railway (free tier — $5 crédito/mês)
 
@@ -23,9 +23,7 @@
 | Variável | Descrição |
 |----------|-----------|
 | `DATABASE_URL` | URL de conexão PostgreSQL (Railway injeta automaticamente) |
-| `EVOLUTION_API_URL` | URL base da Evolution API (ex: `https://evo.seudominio.com`) |
-| `EVOLUTION_API_KEY` | API key da Evolution API |
-| `EVOLUTION_INSTANCE` | Nome da instância conectada ao celular |
+| `BAILEYS_SERVICE_URL` | URL base do serviço Baileys (ex: `https://baileys.up.railway.app`) |
 | `WHATSAPP_GROUP_ID` | ID do grupo WhatsApp que o bot escuta |
 | `BOT_PHONE_NUMBER` | Número do bot para ignorar próprias mensagens |
 
@@ -41,6 +39,7 @@
 | 25/05/2026 | Sem fila de mensagens no MVP | Redis + Celery | Volume ~100 msgs/mês não justifica fila; FastAPI BackgroundTasks suficiente |
 | 25/05/2026 | Parser via regex | LLM parser, NLP | Formato fixo e controlado pelo usuário; determinístico e sem custo |
 | 25/05/2026 | Hospedagem: Railway free tier | Render+Neon, Fly.io | Railway inclui PostgreSQL no mesmo plano, sem cold start, $5 crédito/mês gratuito |
+| 25/05/2026 | WhatsApp: Baileys próprio (substitui Evolution API) | Evolution API v2, WPPConnect | Evolution API tem bug de loop infinito de reconexão em todas versões ≤2.2.3 no Railway; Baileys direto elimina a dependência |
 | 25/05/2026 | HTTP client: httpx | requests, aiohttp | Suporte async nativo, integra bem com FastAPI |
 | 25/05/2026 | Orçamento configurável via WhatsApp | Só via banco/admin | Usuário pode definir/redefinir orçamento por grupo sem acessar infra |
 | 25/05/2026 | Formato posicional: grupo e subgrupo na posição 4 e 5 | Prefixos `grupo:` / `subgrupo:` | Mais limpo para digitar; ambos obrigatórios — bot rejeita se faltar um |

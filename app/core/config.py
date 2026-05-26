@@ -6,9 +6,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
-    EVOLUTION_API_URL: str = ""
-    EVOLUTION_API_KEY: str = ""
-    EVOLUTION_INSTANCE: str = ""
+    BAILEYS_SERVICE_URL: str = ""
 
     WHATSAPP_GROUP_ID: str = ""
     BOT_PHONE_NUMBER: str = ""
