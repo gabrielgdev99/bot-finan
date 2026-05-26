@@ -112,8 +112,7 @@ async function startSocket() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return
     for (const msg of messages) {
-      console.log(`[msg] remoteJid=${msg.key.remoteJid} fromMe=${msg.key.fromMe}`)
-      await forwardToBotWebhook(msg)
+await forwardToBotWebhook(msg)
     }
   })
 }
