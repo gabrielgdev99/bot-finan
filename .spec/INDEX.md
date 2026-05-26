@@ -74,17 +74,17 @@
 | Task | Descrição | Status |
 |------|-----------|--------|
 | ALIAS-T001 | Aliases para categorização automática de lançamentos | [ ] Não iniciada |
-| TEMPLATE-T001 | Templates para lançamentos fixos recorrentes | [ ] Não iniciada |
+| TEMPLATE-T001 | Templates para lançamentos fixos recorrentes | [x] Concluída |
 | MULTI-T001 | Lançamento múltiplo numa mensagem | [ ] Não iniciada |
 
 ### Épico: Inteligência Analítica (Backlog)
 
 | Task | Descrição | Status |
 |------|-----------|--------|
-| PROJ-T001 | Projeção de gasto e saldo no resumo mensal | [ ] Não iniciada |
-| COMPARE-T001 | Comparativo mensal automático no dia 1 | [ ] Não iniciada |
+| PROJ-T001 | Projeção de gasto e saldo no resumo mensal | [x] Concluída |
+| COMPARE-T001 | Comparativo mensal automático no dia 1 | [x] Concluída |
+| HISTORICO-T001 | Histórico mensal de grupo ou subgrupo | [x] Concluída |
 | LEMBRETE-T001 | Lembretes de contas vinculados a templates | [ ] Não iniciada |
-| HISTORICO-T001 | Histórico mensal de grupo ou subgrupo | [ ] Não iniciada |
 | PERIODO-T001 | Resumo por período customizado | [ ] Não iniciada |
 
 ## Arquivos de contexto disponíveis

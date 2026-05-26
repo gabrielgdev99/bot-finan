@@ -28,6 +28,17 @@
 ## 25/05/2026 — Bot em produção (Railway)
 - Migrations passaram a rodar via `subprocess.run(["alembic", "upgrade", "head"])` no lifespan do FastAPI — `releaseCommand` do Railway free tier não disparava
 - Dockerfile do baileys-service corrigido: adicionado `git`, `python3`, `make`, `g++` (Alpine não inclui; Baileys precisa compilar deps nativas)
+
+## 25/05/2026 — TEMPLATE-T001 implementado
+- Criada tabela `templates` com migration 0004: `(id, nome VARCHAR unique, descricao, valor, subgrupo_id FK, cartao nullable)`
+- Model `Template` adicionado com relationship para `Subgrupo`
+- Service `template.py` com funções: `criar_template`, `remover_template`, `listar_templates`, `resolver_template`
+- Parser estendido: `parse_template` (detecta `template: nome - desc - valor - Grupo - Subgrupo [-cartao: ...]`) e `parse_remove_template` (detecta `remove template: nome`)
+- Webhook detecta: comandos de template (`template:`, `remove template:`, `templates`) e nomes de template como possível lançamento (`possivel_template`)
+- Service `lancamento.py` adicionado: `salvar_lancamento_de_template(nome) → Lancamento` que usa data de hoje + deduplicação por `hash(nome + data_hoje)`
+- Mensagem.py implementado: handlers para todos os tipos de template, formatações de resposta (criado, removido, listado) e funções auxiliares `_fmt` e `_formatar_listar_templates`
+- Menu `ajuda` estendido com seção de templates — formato, exemplos e modo de uso
+- Critérios de aceitação: 100% implementados e testados
 - `WHATSAPP_GROUP_ID` configurado com ID real do grupo (`120363411203120829@g.us`) — filtro ativo em produção
 - Bot validado ponta a ponta: lançamento recebido, salvo e resumo respondido via WhatsApp
 
@@ -64,6 +75,29 @@
 - Jobs: `job_resumo_diario` e `job_resumo_bidiario` atualizados para usar `Lancamento.subgrupo.nome` (relacionamento)
 - Help: comando de orçamento atualizado no menu de ajuda para novo formato
 
+## 26/05/2026 — HISTORICO-T001 concluída — histórico mensal de gastos
+- Novo schema `HistoricoMesDTO` com campos: `mes`, `ano`, `gasto`, `orcamento`, `percentual`, `em_andamento`
+- Função `calcular_historico(grupo_id, subgrupo_id=None, n_meses=3, db)` em `resumo.py`:
+  - Retorna últimos N meses (padrão 3) de um grupo ou subgrupo
+  - Marca mês atual com `em_andamento=True`
+  - Inclui meses sem lançamento como `gasto=0` (não omitidos)
+  - Usa orçamento vigente (não histórico) para cálculo de percentual
+- Função `formatar_historico(historico, grupo_nome, subgrupo_nome=None)` em `resumo.py`:
+  - Cabeçalho: `📈 Histórico — Grupo [> Subgrupo]`
+  - Linhas: `• mes/aa: R$ gasto [/ R$ orcamento (pct%) icone] [← em andamento]`
+  - Ícones conforme percentual: ✅ (<80%), ⚠️ (80-99%), 🚨 (≥100%)
+  - Omite coluna de orçamento se orcamento=0 (apenas ✅)
+- Parser `parse_historico(texto)` em `parser.py`:
+  - Detecta `historico: <Grupo>` (todo o grupo) e `historico: <Grupo> > <Subgrupo>` (subgrupo específico)
+  - Retorna `HistoricoComandoDTO(grupo, subgrupo=None)`
+- Webhook detecta tipo "historico" em `_detectar_tipo()`
+- Handler em `mensagem.py`:
+  - Busca grupo por nome; se subgrupo informado, busca também
+  - Retorna erro se grupo/subgrupo não encontrado (case-sensitive)
+  - Chamada a `calcular_historico` e `formatar_historico`
+  - Envio da resposta via WhatsApp
+- Critérios de aceitação: 100% implementados e testados
+
 ## 25/05/2026 — INPUTAR-T001 concluída (MVP implementado)
 - T001.1: setup base — FastAPI, Docker Compose, Alembic, railway.toml
 - T001.2: models SQLAlchemy 2.x async — `Grupo` e `Lancamento` + migration inicial
@@ -72,3 +106,15 @@
 - T001.5: serviço de persistência — deduplicação SHA-256 + proteção race condition
 - T001.6: resumo + resposta — `calcular_resumo` + `enviar_mensagem` via Evolution API
 - MVP completo: fluxo ponta a ponta funcional (webhook → parse → save → resumo → resposta)
+
+## 25/05/2026 — PROJ-T001 concluída — projeção de gasto no resumo mensal
+- `ProjecaoDTO` adicionado em `schemas.py`: `ritmo_diario`, `projecao_fim_mes`, `orcamento_total`, `margem`, `alerta`
+- `calcular_projecao(mes, ano, db)` implementado: calcula dias únicos com lançamentos, ritmo diário, projeção até fim do mês
+  - Retorna `None` se `dias_passados = 0` (bloco omitido no dia 1 sem gastos)
+  - Orçamento total = `SUM(subgrupos.orcamento_mensal)` em escopo global
+  - Usa `calendar.monthrange()` para contar dias corretamente (28/29/30/31)
+  - Alerta: `⚠️` quando projeção >= 90% orçamento, `🚨` quando >= 100%
+- `formatar_projecao(projecao, mes, ano)` implementado: formatação com ritmo, projeção, orçamento, margem e alerta
+- Integração em `processar_mensagem`: resumo on-demand agora anexa projeção ao final se houver
+- Integração em `job_resumo_bidiario()`: job a cada 2 dias agora inclui projeção na resposta
+- Critério de aceitação: bloco funciona corretamente com orçamento = 0 (omite margem)

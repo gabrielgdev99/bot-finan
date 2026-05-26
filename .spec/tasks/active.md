@@ -320,7 +320,7 @@ Resposta:
 **Épico:** Inteligência do Parser
 **Prioridade:** Média
 **Complexidade:** Baixa
-**Status:** [ ] Não iniciada
+**Status:** [x] Concluída — 25/05/2026
 **Depende de:** SUBGRUPO-T001
 
 ### Contexto
@@ -376,15 +376,15 @@ remove template: <nome>
 - `app/services/mensagem.py` — templates de resposta para criado/removido/listado; seção no menu de ajuda
 
 ### Critérios de aceitação
-- [ ] Tabela `templates (id, nome VARCHAR unique, descricao, valor, subgrupo_id FK, cartao nullable)` criada via migration
-- [ ] `template: aluguel - aluguel ap - 1500 - Moradia - Aluguel` cria o template e confirma
-- [ ] `template:` com grupo/subgrupo inexistente responde com erro
-- [ ] Digitar `aluguel` cria lançamento com data de hoje usando os dados do template
-- [ ] Template inexistente digitado como comando cai no fluxo normal (não dá erro de template)
-- [ ] `templates` lista todos com nome, descrição, valor, grupo>subgrupo e cartão se houver
-- [ ] `remove template: aluguel` remove e confirma; inexistente responde com erro
-- [ ] Deduplicação funciona: usar o mesmo template duas vezes no mesmo dia não duplica
-- [ ] Comando `ajuda` inclui seção de templates com formato e exemplos
+- [x] Tabela `templates (id, nome VARCHAR unique, descricao, valor, subgrupo_id FK, cartao nullable)` criada via migration
+- [x] `template: aluguel - aluguel ap - 1500 - Moradia - Aluguel` cria o template e confirma
+- [x] `template:` com grupo/subgrupo inexistente responde com erro
+- [x] Digitar `aluguel` cria lançamento com data de hoje usando os dados do template
+- [x] Template inexistente digitado como comando cai no fluxo normal (não dá erro de template)
+- [x] `templates` lista todos com nome, descrição, valor, grupo>subgrupo e cartão se houver
+- [x] `remove template: aluguel` remove e confirma; inexistente responde com erro
+- [x] Deduplicação funciona: usar o mesmo template duas vezes no mesmo dia não duplica
+- [x] Comando `ajuda` inclui seção de templates com formato e exemplos
 
 ---
 
@@ -454,52 +454,6 @@ mercado - 95 - Alimentação - Mercado
 
 ---
 
-## PROJ-T001 — Projeção de gasto e saldo no resumo mensal
-
-**Épico:** Inteligência Analítica
-**Prioridade:** Alta
-**Complexidade:** Baixa
-**Status:** [ ] Não iniciada
-
-### Contexto
-O resumo atual mostra gasto real vs orçamento. Mas no dia 10 do mês não dá pra saber se vai estourar — o usuário precisa calcular mentalmente. A projeção faz isso automaticamente: com base no ritmo atual de gasto, estima o total ao fim do mês.
-
-### Descrição
-Adicionar bloco de projeção ao final do resumo mensal (tanto on-demand quanto nos jobs agendados):
-
-```
-📈 Projeção para maio/2026:
-• Ritmo atual: R$ 23,50/dia (15 dias passados)
-• Estimativa fim do mês: R$ 728,50
-• Orçamento total: R$ 1.800,00 | Margem restante: R$ 1.071,50
-```
-
-Cálculo:
-- `ritmo = total_gasto_mes / dias_passados_no_mes`
-- `projecao = ritmo * total_dias_no_mes`
-- `margem = soma_orcamentos_subgrupos - projecao`
-
-Alertas de projeção:
-- Projeção > 90% do orçamento total → `⚠️ Projeção indica orçamento apertado`
-- Projeção > 100% → `🚨 Projeção indica estouro do orçamento`
-
-No dia 1 do mês (antes de qualquer gasto) o bloco é omitido.
-
-### Arquivos a modificar
-- `app/services/resumo.py` — `calcular_projecao(mes, ano) → ProjecaoDTO` com ritmo diário, estimativa e margem; chamar ao final de `calcular_resumo`
-- `app/schemas.py` — `ProjecaoDTO (ritmo_diario, projecao_fim_mes, orcamento_total, margem, alerta)`
-- `app/services/mensagem.py` — `formatar_projecao(projecao: ProjecaoDTO) → str`; anexar ao final das mensagens de resumo
-
-### Critérios de aceitação
-- [ ] Resumo on-demand (`resumo`) exibe bloco de projeção ao final
-- [ ] Job de 2 em 2 dias exibe projeção no relatório enviado
-- [ ] Ritmo calculado como `total_gasto / dias_passados` (dias com ao menos 1 lançamento contam)
-- [ ] Projeção = `ritmo * dias_no_mes` (considera meses com 28/29/30/31 dias corretamente)
-- [ ] Alerta `⚠️` quando projeção > 90% do orçamento total
-- [ ] Alerta `🚨` quando projeção > 100% do orçamento total
-- [ ] Bloco omitido quando `dias_passados = 0` (dia 1 sem lançamentos)
-- [ ] Funciona corretamente em meses com orçamento total = 0 (omite comparação de margem)
-
 ---
 
 ## COMPARE-T001 — Comparativo mensal automático no dia 1
@@ -507,7 +461,7 @@ No dia 1 do mês (antes de qualquer gasto) o bloco é omitido.
 **Épico:** Inteligência Analítica
 **Prioridade:** Média
 **Complexidade:** Baixa
-**Status:** [ ] Não iniciada
+**Status:** [x] Concluída — 25/05/2026
 
 ### Contexto
 No dia 1 de cada mês o usuário não tem visibilidade de como foi o mês que fechou vs o anterior. O job automático entrega esse comparativo direto no WhatsApp sem precisar pedir nada.
@@ -547,15 +501,15 @@ vs março: R$ 870,00 → +R$ 280,00 (+32%)
 - `app/services/jobs.py` — novo job `job_comparativo_mensal` agendado para dia 1 às 08h00 BRT; registrar no scheduler do FastAPI
 
 ### Critérios de aceitação
-- [ ] Job executa todo dia 1 às 08h00 BRT
-- [ ] Compara mês `M-1` vs mês `M-2` (ex: no dia 1/06 compara mai vs abr)
-- [ ] Exibe gasto real, orçamento e percentual de cada grupo
-- [ ] Exibe delta absoluto e percentual vs mês anterior por grupo
-- [ ] Ícone `⬆️` quando aumento, `⬇️` quando redução, `➡️` quando variação < 5%
-- [ ] Alerta `🚨` em grupos que estouraram orçamento no mês fechado
-- [ ] Grupos sem lançamento em nenhum dos dois meses são omitidos
-- [ ] Grupo sem lançamento no mês anterior mas com gasto no mês fechado aparece como "novo" sem delta
-- [ ] Total consolidado ao final com delta geral
+- [x] Job executa todo dia 1 às 08h00 BRT
+- [x] Compara mês `M-1` vs mês `M-2` (ex: no dia 1/06 compara mai vs abr)
+- [x] Exibe gasto real, orçamento e percentual de cada grupo
+- [x] Exibe delta absoluto e percentual vs mês anterior por grupo
+- [x] Ícone `⬆️` quando aumento, `⬇️` quando redução, `➡️` quando variação < 5%
+- [x] Alerta `🚨` em grupos que estouraram orçamento no mês fechado
+- [x] Grupos sem lançamento em nenhum dos dois meses são omitidos
+- [x] Grupo sem lançamento no mês anterior mas com gasto no mês fechado aparece como "novo" sem delta
+- [x] Total consolidado ao final com delta geral
 
 ---
 
@@ -651,63 +605,6 @@ remove lembrete: <nome-template>
 - [ ] `lembretes` lista todos com modo (manual/auto), dia e dados do template
 - [ ] `remove lembrete: aluguel` remove e confirma; inexistente responde com erro
 - [ ] Comando `ajuda` inclui seção de lembretes com formato e exemplos
-
----
-
-## HISTORICO-T001 — Histórico mensal de grupo ou subgrupo
-
-**Épico:** Inteligência Analítica
-**Prioridade:** Média
-**Complexidade:** Baixa
-**Status:** [ ] Não iniciada
-**Depende de:** SUBGRUPO-T001
-
-### Contexto
-Antes de ajustar um orçamento, o usuário precisa saber como foi o gasto real nos últimos meses. O comando `historico:` mostra os últimos 3 meses de um grupo ou subgrupo com gasto, orçamento e percentual — base factual para calibrar os valores.
-
-### Descrição
-
-**Por subgrupo:**
-```
-historico: Alimentação > Mercado
-```
-Resposta:
-```
-📈 Histórico — Alimentação > Mercado
-• mar/26: R$ 380,00 / R$ 400,00 (95%) ⚠️
-• abr/26: R$ 290,00 / R$ 400,00 (72%) ✅
-• mai/26: R$ 210,00 / R$ 400,00 (52%) ✅ ← em andamento
-```
-
-**Por grupo (soma dos subgrupos):**
-```
-historico: Alimentação
-```
-Resposta:
-```
-📈 Histórico — Alimentação
-• mar/26: R$ 820,00 / R$ 900,00 (91%) ⚠️
-• abr/26: R$ 670,00 / R$ 900,00 (74%) ✅
-• mai/26: R$ 430,00 / R$ 900,00 (47%) ✅ ← em andamento
-```
-
-Mês em andamento sempre aparece com `← em andamento`. Orçamento exibido é o vigente no momento da consulta (não histórico de orçamentos).
-
-### Arquivos a modificar
-- `app/services/resumo.py` — `calcular_historico(grupo_id, subgrupo_id=None, n_meses=3) → list[HistoricoMesDTO]`
-- `app/schemas.py` — `HistoricoMesDTO (mes, ano, gasto, orcamento, percentual, em_andamento)`
-- `app/services/parser.py` — detectar padrão `historico: <Grupo>` e `historico: <Grupo> > <Subgrupo>`
-- `app/routers/webhook.py` — rotear comando `historico:` para o service
-- `app/services/mensagem.py` — `formatar_historico(historico: list[HistoricoMesDTO]) → str`
-
-### Critérios de aceitação
-- [ ] `historico: Alimentação > Mercado` retorna os últimos 3 meses do subgrupo
-- [ ] `historico: Alimentação` retorna os últimos 3 meses do grupo (soma dos subgrupos)
-- [ ] Mês atual aparece com `← em andamento`
-- [ ] Meses sem lançamento aparecem como `R$ 0,00` (não são omitidos)
-- [ ] Grupo ou subgrupo inexistente responde com erro indicando o nome inválido
-- [ ] Ícones ⚠️/🚨 aplicados conforme percentual (>= 80% e >= 100%)
-- [ ] Funciona corretamente para grupos/subgrupos com orçamento = 0 (omite coluna de orçamento)
 
 ---
 
