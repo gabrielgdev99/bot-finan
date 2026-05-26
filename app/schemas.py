@@ -18,6 +18,7 @@ class LancamentoDTO:
 @dataclass
 class OrcamentoDTO:
     grupo: str
+    subgrupo: str
     valor: Decimal
 
 

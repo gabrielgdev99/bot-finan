@@ -52,22 +52,25 @@ DD/MM/AA - <descrição> - <valor> - <Grupo> - <Subgrupo> [- cartao: <cartão>] 
 ```
 > Se orçamento não definido (= 0): omite a linha 📊
 
-### 2. Definir/redefinir orçamento de grupo
+### 2. Definir/redefinir orçamento de subgrupo
 
 **Formato:**
 ```
-orçamento: <grupo> - <valor>
+orçamento: <grupo> - <subgrupo> - <valor>
 ```
 
 **Exemplo:**
 ```
-orçamento: ref. fora de casa - 300
+orçamento: Alimentação - Mercado - 800
 ```
 
 **Resposta do bot:**
 ```
-✅ Orçamento de "ref. fora de casa" definido: R$ 300,00/mês
+✅ Orçamento de "Alimentação > Mercado" definido: R$ 800,00/mês
 ```
+
+> O orçamento do grupo é calculado automaticamente como a soma dos orçamentos dos seus subgrupos.
+> Subgrupo é uma entidade própria que pode ter orçamento independente dentro de um grupo.
 
 ### 3. Menu de ajuda
 
@@ -151,9 +154,13 @@ Envia para o grupo WhatsApp o resumo do mês corrente agrupado por grupo → sub
 
 ## Dados a Persistir
 
-**Tabela `grupos`:** id, nome (unique), orcamento_mensal (Decimal, default 0)
+**Tabela `grupos`:** id, nome (unique)
 
-**Tabela `lancamentos`:** id, criado_em, data_gasto, descricao, valor, grupo_id (FK), subgrupo (not null), cartao, data_pagamento (not null — default = data_gasto quando não informado), hash_msg (unique, SHA-256 do texto original)
+**Tabela `subgrupos`:** id, grupo_id (FK), nome, orcamento_mensal (Decimal, default 0) — UNIQUE(grupo_id, nome)
+
+> O orçamento do grupo é `SUM(subgrupos.orcamento_mensal)` onde `subgrupo.grupo_id = grupo.id`.
+
+**Tabela `lancamentos`:** id, criado_em, data_gasto, descricao, valor, grupo_id (FK), subgrupo_id (FK → subgrupos.id, not null), cartao, data_pagamento (not null — default = data_gasto quando não informado), hash_msg (unique, SHA-256 do texto original)
 
 > Resumo mensal filtra por `data_pagamento`. Compra em cartão com pagamento em mês seguinte aparece no resumo do mês de pagamento.
 

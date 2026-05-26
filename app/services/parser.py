@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from app.schemas import CancelaDTO, LancamentoDTO, OrcamentoDTO, RelatorioCartaoDTO, ResumoComandoDTO, UltimosDTO
 
 _ORCAMENTO_RE = re.compile(
-    r"^or[cç]amento:\s*(.+?)\s*-\s*([\d]+(?:[.,]\d+)?)\s*$",
+    r"^or[cç]amento:\s*(.+?)\s*-\s*(.+?)\s*-\s*([\d]+(?:[.,]\d+)?)\s*$",
     re.IGNORECASE,
 )
 _CARTAO_CMD_RE = re.compile(
@@ -117,20 +117,28 @@ def parse_orcamento(texto: str) -> OrcamentoDTO | None:
         return None
 
     grupo = match.group(1).strip()
-    valor = _parse_decimal(match.group(2))
+    subgrupo = match.group(2).strip()
+    valor = _parse_decimal(match.group(3))
     if valor is None or valor < 0:
         return None
 
-    return OrcamentoDTO(grupo=grupo, valor=valor)
+    return OrcamentoDTO(grupo=grupo, subgrupo=subgrupo, valor=valor)
 
 
 def _parse_data_gasto(texto: str) -> date | None:
-    match = re.match(r"^(\d{2})/(\d{2})/(\d{2})$", texto.strip())
+    match = re.match(r"^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$", texto.strip())
     if not match:
         return None
-    dia, mes, ano_curto = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    dia, mes = int(match.group(1)), int(match.group(2))
+    ano_str = match.group(3)
+    if ano_str is None:
+        ano = date.today().year
+    elif len(ano_str) == 2:
+        ano = 2000 + int(ano_str)
+    else:
+        ano = int(ano_str)
     try:
-        return date(2000 + ano_curto, mes, dia)
+        return date(ano, mes, dia)
     except ValueError:
         return None
 

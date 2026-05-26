@@ -25,6 +25,12 @@
 - Resumo mensal passa a filtrar por `data_pagamento` (antes filtrava por `data_gasto`)
 - Decisão: casal controla gastos por mês de pagamento, não de compra
 
+## 25/05/2026 — Bot em produção (Railway)
+- Migrations passaram a rodar via `subprocess.run(["alembic", "upgrade", "head"])` no lifespan do FastAPI — `releaseCommand` do Railway free tier não disparava
+- Dockerfile do baileys-service corrigido: adicionado `git`, `python3`, `make`, `g++` (Alpine não inclui; Baileys precisa compilar deps nativas)
+- `WHATSAPP_GROUP_ID` configurado com ID real do grupo (`120363411203120829@g.us`) — filtro ativo em produção
+- Bot validado ponta a ponta: lançamento recebido, salvo e resumo respondido via WhatsApp
+
 ## 25/05/2026 — BAILEYS-T001 concluída (substitui Evolution API)
 - Criado serviço Node.js próprio com Baileys em `baileys-service/`
 - Motivo: Evolution API v2.2.3 tem bug de loop infinito de reconexão, impedia geração do QR no Railway
@@ -32,6 +38,31 @@
 - `app/services/whatsapp.py` ajustado para chamar `BAILEYS_SERVICE_URL/send`
 - `webhook.py` não alterado — payload encapsulado no formato `EvolutionWebhookPayload`
 - Variáveis `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE` removidas → substituídas por `BAILEYS_SERVICE_URL`
+
+## 25/05/2026 — DATA-T001 concluída — parser de data flexível
+- `_parse_data_gasto` reescrito com regex `(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?`
+- Aceita: `DD/MM/AA`, `DD/MM/AAAA`, `D/M/AA`, `D/M/AAAA`, `DD/MM`, `D/M`
+- Sem ano → assume ano corrente; ano com 2 dígitos → 2000+AA; 4 dígitos → direto
+
+## 25/05/2026 — Decisão estrutural: subgrupos como entidade própria
+- Subgrupo promovido de texto livre (`lancamentos.subgrupo String`) para entidade com tabela própria
+- Nova tabela `subgrupos (id, grupo_id FK, nome, orcamento_mensal)` com UNIQUE(grupo_id, nome)
+- `lancamentos.subgrupo` (string) → `lancamentos.subgrupo_id` (FK para `subgrupos.id`)
+- `grupos.orcamento_mensal` removido — orçamento do grupo passa a ser `SUM(subgrupos.orcamento_mensal)`
+- Motivo: sem entidade própria, subgrupos não podem ter orçamento individual e o total do grupo fica inconsistente
+- Task gerada: SUBGRUPO-T001 (bloqueante para ORCA-T001 e seed de dados)
+- Comando de orçamento muda para: `orçamento: <grupo> - <subgrupo> - <valor>`
+
+## 25/05/2026 — SUBGRUPO-T001 concluída — subgrupos com orçamento próprio
+- Criado model `Subgrupo(id, grupo_id FK, nome, orcamento_mensal, UNIQUE(grupo_id, nome))`
+- Migration 0003: cria tabela `subgrupos`, migra dados existentes, substitui `lancamentos.subgrupo` (string) por FK
+- `grupos.orcamento_mensal` removido do model — agora é `SUM(subgrupos.orcamento_mensal)` via query
+- Schema `OrcamentoDTO`: adicionado campo `subgrupo: str`
+- Parser: `parse_orcamento` atualizado para regex 3 campos: `grupo - subgrupo - valor`
+- Services: `salvar_lancamento` resolve/cria `Subgrupo` automaticamente; `definir_orcamento` salva em `Subgrupo.orcamento_mensal`
+- Resumo: `calcular_resumo` usa `SUM(subgrupos.orcamento_mensal)` com join; `calcular_resumo_subgrupos` exibe orçamento por subgrupo
+- Jobs: `job_resumo_diario` e `job_resumo_bidiario` atualizados para usar `Lancamento.subgrupo.nome` (relacionamento)
+- Help: comando de orçamento atualizado no menu de ajuda para novo formato
 
 ## 25/05/2026 — INPUTAR-T001 concluída (MVP implementado)
 - T001.1: setup base — FastAPI, Docker Compose, Alembic, railway.toml

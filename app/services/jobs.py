@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.lancamento import Lancamento
+from app.models.subgrupo import Subgrupo
 from app.services.whatsapp import enviar_mensagem
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ async def job_resumo_diario() -> None:
             resultado = await session.execute(
                 select(Lancamento)
                 .where(Lancamento.data_gasto == ontem)
-                .options(selectinload(Lancamento.grupo))
+                .options(selectinload(Lancamento.grupo), selectinload(Lancamento.subgrupo))
                 .order_by(Lancamento.descricao)
             )
             lancamentos = resultado.scalars().all()
@@ -43,9 +44,7 @@ async def job_resumo_diario() -> None:
             total = sum(l.valor for l in lancamentos)
 
             for l in lancamentos:
-                categoria = l.grupo.nome
-                if l.subgrupo:
-                    categoria = f"{categoria}/{l.subgrupo}"
+                categoria = f"{l.grupo.nome}/{l.subgrupo.nome}"
 
                 linha = f"• {l.descricao} — R$ {_fmt(l.valor)} | {categoria}"
                 if l.cartao:
@@ -76,8 +75,8 @@ async def job_resumo_bidiario() -> None:
                     extract("month", Lancamento.data_pagamento) == mes_atual,
                     extract("year", Lancamento.data_pagamento) == ano_atual,
                 )
-                .options(selectinload(Lancamento.grupo))
-                .order_by(Lancamento.grupo_id, Lancamento.subgrupo)
+                .options(selectinload(Lancamento.grupo), selectinload(Lancamento.subgrupo))
+                .order_by(Lancamento.grupo_id, Lancamento.subgrupo_id)
             )
             lancamentos = resultado.scalars().all()
 
@@ -85,7 +84,7 @@ async def job_resumo_bidiario() -> None:
         grupos: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         for l in lancamentos:
             grupo_nome = l.grupo.nome
-            subgrupo = l.subgrupo or "Outros"
+            subgrupo = l.subgrupo.nome
             grupos[grupo_nome][subgrupo] += float(l.valor)
 
         mes_nome = agora.strftime("%b/%y").capitalize()

@@ -54,8 +54,8 @@ async def processar_mensagem(texto: str, tipo: str, grupo_id: str) -> None:
             if dto is None:
                 return
 
-            grupo = await definir_orcamento(dto, db)
-            resposta = formatar_confirmacao_orcamento(grupo.nome, grupo.orcamento_mensal)
+            subgrupo = await definir_orcamento(dto, db)
+            resposta = formatar_confirmacao_orcamento(dto.grupo, subgrupo.nome, subgrupo.orcamento_mensal)
             await enviar_mensagem(grupo_id, resposta)
 
         elif tipo == "cartao":

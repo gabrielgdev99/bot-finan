@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.grupo import Grupo
 from app.models.lancamento import Lancamento
+from app.models.subgrupo import Subgrupo
 from app.schemas import LancamentoDTO, LancamentoInfo, OrcamentoDTO
 
 logger = logging.getLogger(__name__)
@@ -25,13 +26,14 @@ async def salvar_lancamento(
         return None
 
     grupo = await _obter_ou_criar_grupo(dto.grupo, db)
+    subgrupo = await _obter_ou_criar_subgrupo(dto.subgrupo, grupo.id, db)
 
     lancamento = Lancamento(
         data_gasto=dto.data_gasto,
         descricao=dto.descricao,
         valor=dto.valor,
         grupo_id=grupo.id,
-        subgrupo=dto.subgrupo,
+        subgrupo_id=subgrupo.id,
         cartao=dto.cartao,
         data_pagamento=dto.data_pagamento,
         hash_msg=hash_msg,
@@ -49,13 +51,14 @@ async def salvar_lancamento(
         return None
 
 
-async def definir_orcamento(dto: OrcamentoDTO, db: AsyncSession) -> Grupo:
+async def definir_orcamento(dto: OrcamentoDTO, db: AsyncSession) -> Subgrupo:
     grupo = await _obter_ou_criar_grupo(dto.grupo, db)
-    grupo.orcamento_mensal = dto.valor
+    subgrupo = await _obter_ou_criar_subgrupo(dto.subgrupo, grupo.id, db)
+    subgrupo.orcamento_mensal = dto.valor
     await db.commit()
-    await db.refresh(grupo)
-    logger.info("Orçamento definido | grupo=%s | valor=%s", dto.grupo, dto.valor)
-    return grupo
+    await db.refresh(subgrupo)
+    logger.info("Orçamento definido | grupo=%s | subgrupo=%s | valor=%s", dto.grupo, dto.subgrupo, dto.valor)
+    return subgrupo
 
 
 async def _obter_ou_criar_grupo(nome: str, db: AsyncSession) -> Grupo:
@@ -63,10 +66,23 @@ async def _obter_ou_criar_grupo(nome: str, db: AsyncSession) -> Grupo:
     if grupo:
         return grupo
 
-    grupo = Grupo(nome=nome, orcamento_mensal=Decimal("0"))
+    grupo = Grupo(nome=nome)
     db.add(grupo)
     await db.flush()
     return grupo
+
+
+async def _obter_ou_criar_subgrupo(nome: str, grupo_id: int, db: AsyncSession) -> Subgrupo:
+    subgrupo = await db.scalar(
+        select(Subgrupo).where(Subgrupo.nome == nome, Subgrupo.grupo_id == grupo_id)
+    )
+    if subgrupo:
+        return subgrupo
+
+    subgrupo = Subgrupo(nome=nome, grupo_id=grupo_id, orcamento_mensal=Decimal("0"))
+    db.add(subgrupo)
+    await db.flush()
+    return subgrupo
 
 
 async def listar_ultimos(n: int, db: AsyncSession) -> list[tuple[Lancamento, str]]:

@@ -18,9 +18,10 @@ class Lancamento(Base):
     descricao: Mapped[str] = mapped_column(String(200), nullable=False)
     valor: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     grupo_id: Mapped[int] = mapped_column(ForeignKey("grupos.id"), nullable=False)
-    subgrupo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subgrupo_id: Mapped[int] = mapped_column(ForeignKey("subgrupos.id"), nullable=False)
     cartao: Mapped[str | None] = mapped_column(String(100), nullable=True)
     data_pagamento: Mapped[date] = mapped_column(Date, nullable=False)
     hash_msg: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
 
     grupo: Mapped["Grupo"] = relationship(back_populates="lancamentos")
+    subgrupo: Mapped["Subgrupo"] = relationship(back_populates="lancamentos")
